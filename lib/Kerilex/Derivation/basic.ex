@@ -60,6 +60,10 @@ defmodule Kerilex.Derivation.Basic do
     binary_to_qb64("0B", sig, 64)
   end
 
+  def binary_to_blake3_dig(data) do
+    binary_to_qb64("E", data, 32)
+  end
+
   def binary_to_qb64(code, data, size) do
     case byte_size(data) do
       bs when bs == size ->

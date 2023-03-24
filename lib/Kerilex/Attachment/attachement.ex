@@ -4,6 +4,20 @@ defmodule Kerilex.Attachment do
   """
 
   alias Kerilex.Attachment.Number
+  require Kerilex.Constants
+  import Kerilex.Constants
+
+  @nt_rcpt_couples :nt_rcpt_couples
+  @idx_ctrl_sigs :idx_ctrl_sigs
+  @idx_wit_sigs :idx_wit_sigs
+  @fs_repl_couples :fs_repl_couples
+  @seal_src_couples :seal_src_couples
+
+  const(nt_rcpt_couples, @nt_rcpt_couples)
+  const(idx_ctrl_sigs, @idx_ctrl_sigs)
+  const(idx_wit_sigs, @idx_wit_sigs)
+  const(fs_repl_couples, @fs_repl_couples)
+  const(seal_src_couples, @seal_src_couples)
 
   @code "-V"
 
@@ -11,11 +25,11 @@ defmodule Kerilex.Attachment do
   def code_match?(<<_att::bitstring>>), do: false
 
   @parsers %{
-    Kerilex.Attachment.NonTransReceiptCouples => :nt_rcpt_couples,
-    Kerilex.Attachment.IndexedControllerSigs => :idx_ctrl_sigs,
-    Kerilex.Attachment.IndexedWitnessSigs => :idx_wit_sigs,
-    Kerilex.Attachment.FirstSeenReplayCouples => :fs_repl_couples,
-    Kerilex.Attachment.SealSourceCouples => :seal_src_couples
+    Kerilex.Attachment.NonTransReceiptCouples => @nt_rcpt_couples,
+    Kerilex.Attachment.IndexedControllerSigs => @idx_ctrl_sigs,
+    Kerilex.Attachment.IndexedWitnessSigs => @idx_wit_sigs,
+    Kerilex.Attachment.FirstSeenReplayCouples => @fs_repl_couples,
+    Kerilex.Attachment.SealSourceCouples => @seal_src_couples
   }
 
   def parse(kel) do
