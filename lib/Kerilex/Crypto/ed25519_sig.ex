@@ -61,4 +61,10 @@ defmodule Kerilex.Crypto.Ed25519Sig do
     sig = b64_sig |> QB64.decode_qb64_value(1, 1, 88, 0)
     {:ok, {@sig_type, sig}, att_rest}
   end
+
+
+  def valid?({@sig_type, sig}, data, pk) do
+    sig
+    |>:enacl.sign_verify_detached(data, pk)
+  end
 end

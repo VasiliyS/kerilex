@@ -54,7 +54,7 @@ defmodule Kerilex.KEL do
       {:ok, pa, kel_rest} ->
         {:ok, Map.merge(msg, pa), kel_rest}
 
-      {:error, reason}  ->
+      {:error, reason} ->
         as =
           kel
           |> byte_size()
@@ -124,9 +124,7 @@ defmodule Kerilex.KEL do
     |> saidify(pmsg)
   end
 
-
   @said_placeholder String.duplicate("#", 44)
-
 
   defp saidify(ll, pmsg) do
     ll
@@ -176,7 +174,23 @@ defmodule Kerilex.KEL do
     end
   end
 
-  def check_sigs(_parsed_msg, _keri_msg) do
+  defp check_sigs(parsed_msg, %{} = keri_msg) do
+    if keri_msg |> Map.has_key?(Att.nt_rcpt_couples()) do
+      check_witness_rcpts(keri_msg)
+    else
+      parsed_msg |> check_idx_sigs(keri_msg)
+    end
+  end
+
+  defp check_witness_rcpts(keri_msg) do
+    serd_msg = keri_msg |> Map.fetch!(:serd_msg)
+
+    keri_msg
+    |> Map.fetch!(Att.nt_rcpt_couples())
+    |> Att.NonTransReceiptCouples.check(serd_msg)
+  end
+
+  defp check_idx_sigs(_parsed_msg, _keri_msg) do
     :ok
   end
 end

@@ -37,4 +37,28 @@ defmodule Kerilex.Attachment.NonTransReceiptCouples do
         error
     end
   end
+
+  alias Kerilex.Attachment, as: Att
+  def check(receipt_couples, serd_msg) when is_list(receipt_couples) do
+    receipt_couples
+    |> Enum.with_index()
+    |> Enum.reduce_while(
+      false,
+      fn
+        {rcpt_couple, idx}, _acc ->
+          if rcpt_couple |> Att.NonTransReceiptCouple.valid?(serd_msg) do
+            {:cont, true}
+          else
+            {:halt, {false, idx}}
+          end
+      end
+    )
+    |> case do
+      true ->
+        :ok
+
+      {false, idx} ->
+        {:error, "NonTransReceiptCouple idx: #{idx} failed sig check"}
+    end
+  end
 end

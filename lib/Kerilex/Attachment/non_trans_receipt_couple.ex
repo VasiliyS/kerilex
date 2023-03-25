@@ -24,4 +24,9 @@ defmodule Kerilex.Attachment.NonTransReceiptCouple do
   defp parse_sig(<<att_rest::bitstring>>) do
     Signature.parse(att_rest, _sig_container = nil)
   end
+
+  def valid?(%__MODULE__{pre: pre, sig: sig}, data) do
+    pk = pre |> NTP.to_binary!()
+    sig |> Signature.valid?(data, pk)
+  end
 end

@@ -35,4 +35,9 @@ defmodule Kerilex.Attachment.Signature do
         {:error, "unsupported signature code: #{code}"}
     end
   end
+
+  def valid?(sig, data, pk) do
+    #TODO(VS): handle other sig types
+    sig |> EdSig.valid?(data, pk)
+  end
 end
