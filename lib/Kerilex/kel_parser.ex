@@ -178,7 +178,7 @@ defmodule Kerilex.KEL do
     if keri_msg |> Map.has_key?(Att.nt_rcpt_couples()) do
       check_witness_rcpts(keri_msg)
     else
-      parsed_msg |> check_idx_sigs(keri_msg)
+      parsed_msg |> check_all_idx_sigs(keri_msg)
     end
   end
 
@@ -188,7 +188,7 @@ defmodule Kerilex.KEL do
     |> Att.NonTransReceiptCouples.check(serd_msg)
   end
 
-  defp check_idx_sigs(parsed_msg, %{serd_msg: serd_msg} = keri_msg) do
+  defp check_all_idx_sigs(parsed_msg, %{serd_msg: serd_msg} = keri_msg) do
     with {:ok, wit_sigs} <-
            keri_msg
            |> Map.fetch(Att.idx_wit_sigs())
@@ -209,12 +209,17 @@ defmodule Kerilex.KEL do
   end
 
   defp check_backer_sigs(parsed_msg, serd_msg, wit_sigs) do
-    with {:ok, backers_lst} <- parsed_msg |> get_list_of("b"),
-         :ok <- backers_lst |> validate_idx_sigs(wit_sigs, serd_msg) do
-      :ok
-    else
+    check_idx_sigs(parsed_msg, serd_msg, wit_sigs, "b")
+    |> case do
       {:error, reason} ->
         {:error, "witness signature check failed:" <> reason}
+      res -> res
+    end
+  end
+
+  defp check_idx_sigs(parsed_msg, serd_msg, wit_sigs, key) do
+    with {:ok, backers_lst} <- parsed_msg |> get_list_of(key),
+         :ok <- backers_lst |> validate_idx_sigs(wit_sigs, serd_msg) do
     end
   end
 
@@ -236,41 +241,42 @@ defmodule Kerilex.KEL do
   defp validate_idx_sigs([], _idx_sigs, _data), do: {:error, "msg has an empty key list"}
 
   defp validate_idx_sigs(key_lst, idx_sigs, data) do
-    if length(key_lst) != length(idx_sigs) do
-      {:error, "number of keys and sigs don't match"}
-    else
-      key_lst
-      # [{key, ind},...]
-      |> Stream.with_index()
-      # [{{key, ind}, sig}, ...]
-      |> Stream.zip(idx_sigs)
-      |> Enum.reduce_while(
-        nil,
-        fn {key_idx, sig}, _acc ->
-          validate_idx_sig(key_idx, sig, data)
-          |> case do
-            :ok ->
-              {:cont, :ok}
+    nok = length(key_lst)
 
-            error ->
-              {:halt, error}
-          end
+    idx_sigs
+    |> Enum.reduce_while(
+      nil,
+      fn sig, _acc ->
+        validate_idx_sig(nok, key_lst, sig, data)
+        |> case do
+          :ok ->
+            {:cont, :ok}
+
+          error ->
+            {:halt, error}
         end
-      )
-    end
+      end
+    )
   end
 
   alias Kerilex.Attachment.Signature, as: Sig
 
-  defp validate_idx_sig({key_qb64, key_idn}, %{sig: sig, ind: sidn}, data) do
-    if key_idn != sidn do
-      {:error, "key #{key_qb64} order doesn't match that of sig, key:#{key_idn} sig:#{sidn}"}
+  defp validate_idx_sig(nok, key_lst, %{sig: sig, ind: sind}, data) do
+    if sind > nok do
+      {:error, "sig ind error: got: #{sind}, total keys: #{nok}"}
     else
+      key_qb64 = key_lst |> Enum.at(sind)
       Sig.check_with_qb64key(sig, data, key_qb64)
     end
   end
 
-  defp check_ctrl_sigs(_parsed_msg, _serd_msg, _ctrl_sigs) do
-    :ok
+  defp check_ctrl_sigs(parsed_msg, serd_msg, ctrl_sigs) do
+
+    check_idx_sigs(parsed_msg, serd_msg, ctrl_sigs, "k")
+    |> case do
+      {:error, reason} ->
+        {:error, "controller signature check failed:" <> reason}
+      res -> res
+    end
   end
 end
