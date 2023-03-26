@@ -26,8 +26,9 @@ defmodule Kerilex.Attachment.Signature do
   end
 
   def parse(<<att::bitstring>>, sig_container) do
-    cond do #TODO(VS): handle other signature types
-       EdSig.code_match?(att) ->
+    # TODO(VS): handle other signature types
+    cond do
+      EdSig.code_match?(att) ->
         EdSig.parse(att, sig_container)
 
       true ->
@@ -36,8 +37,28 @@ defmodule Kerilex.Attachment.Signature do
     end
   end
 
-  def valid?(sig, data, pk) do
-    #TODO(VS): handle other sig types
-    sig |> EdSig.valid?(data, pk)
+  def valid?(sig, data, raw_pk) when is_tuple(sig) do
+    # TODO(VS): handle other sig types
+    sig |> EdSig.valid?(data, raw_pk)
+  end
+
+  alias Kerilex.Crypto
+
+  def check_with_qb64key({sig_type, _} = sig, data, key_qb64) do
+    with {:ok, raw_key, key_type} <-
+           key_qb64 |> Crypto.to_raw_key(),
+         true <-
+           if(sig |> valid?(data, raw_key), do: true, else: {:sig_err, key_type, sig_type}) do
+      :ok
+    else
+      {:sig_err, key_type, sig_type} when key_type != sig_type ->
+        {:error, "sig type mismatch, key:#{inspect(key_type)} sig:#{inspect(sig_type)} "}
+
+      {:sig_err, _, _} ->
+        {:error, ""}
+
+      error ->
+        error
+    end
   end
 end

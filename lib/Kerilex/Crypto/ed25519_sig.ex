@@ -4,12 +4,12 @@ defmodule Kerilex.Crypto.Ed25519Sig do
   """
   alias Kerilex.Derivation.Basic, as: QB64
   alias Kerilex.Attachment.Number
+  alias Kerilex.Crypto.Ed25519, as: Ed
   # alias Kerilex.Attachment.IndexedControllerSig, as: ICS
 
-  defstruct sig: <<>>
-  @sig_type :ed25519
+  #defstruct sig: <<>>
+  @sig_type Ed.type
 
-  # TODO(VS): extend to handle rotation sigs (2A + ind + oind)
   def indexed_sign(data, ind, sk) do
     with {:ok, ind} <- Number.int_to_b64(ind, maxpadding: 1),
          sig <- sign(data, sk) do

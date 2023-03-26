@@ -39,7 +39,7 @@ defmodule Kerilex.Attachment do
     else
       {%{} = _ap, rest_att} ->
         ras = rest_att |> byte_size |> min(10)
-        {:error, "uknown parser for: '#{binary_part(rest_att, 0, ras)}...' "}
+        {:error, "unknown parser for: '#{binary_part(rest_att, 0, ras)}...' "}
 
       error ->
         error
@@ -53,14 +53,14 @@ defmodule Kerilex.Attachment do
          att_size = att_quadlets * 4,
          # avoid handling MatchError
          {:ok, att_size} <-
-           if(att_size <= kel_size, do: {:ok, att_size}, else: {:error, att_size}) do
+           if(att_size <= kel_size, do: {:ok, att_size}, else: {:size_error, att_size}) do
       <<att::binary-size(att_size), rest_kel::bitstring>> = kel
       {:ok, att, rest_kel}
     else
       {:error, _msg} ->
-        {:error, "unparsable '-V' size parameter #{b64_size}"}
+        {:error, "unparsable '#{@code}' size parameter #{b64_size}"}
 
-      {:error, att_size} when is_number(att_size) ->
+      {:size_error, att_size} ->
         {:error, "attachment size is too large, want: #{att_size}, got: #{kel_size} bytes"}
     end
   end

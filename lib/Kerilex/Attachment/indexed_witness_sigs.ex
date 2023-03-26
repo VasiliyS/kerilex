@@ -1,7 +1,7 @@
 defmodule Kerilex.Attachment.IndexedWitnessSigs do
   @moduledoc """
     encoding and decoding of "-B##" counter code:
-    Count of attached qualified Base64 indexed controller signatures
+    Count of attached qualified Base64 indexed witness signatures
   """
 
   # defstruct sigs: []

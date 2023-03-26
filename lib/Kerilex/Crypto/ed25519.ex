@@ -4,6 +4,10 @@ defmodule Kerilex.Crypto.Ed25519 do
 
   defstruct public: "", secret: ""
 
+  import Kerilex.Constants
+
+  const type, :ed25519
+
   def new_keypair(<<"0A", _::binary>> = salt) do
     sb = Basic.qb64_to_binary(salt)
 
