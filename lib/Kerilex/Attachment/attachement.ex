@@ -3,6 +3,7 @@ defmodule Kerilex.Attachment do
     Encodes (TODO) and Parses CESR Attachment
   """
 
+  alias Kerilex.Derivation.Basic
   alias Kerilex.Attachment.Number
   require Kerilex.Constants
   import Kerilex.Constants
@@ -106,6 +107,30 @@ defmodule Kerilex.Attachment do
       {pa, rest_attach, true}
     else
       {pam, rest_attach, false}
+    end
+  end
+
+  #############   encoding functions ###############
+  def encode(parts) when is_list(parts) do
+    encode(to_string(parts))
+  end
+
+  def encode(parts) when is_binary(parts) do
+    ps = byte_size(parts)
+
+    if rem(ps, 4) != 0 do
+      {:error, "badly formed data, size should be divisible by 4"}
+    else
+      ps
+      |> div(4)
+      |> Number.int_to_b64(maxpadding: 2)
+      |> case do
+        {:ok, size_quadlets} ->
+         {:ok, to_string([@code, size_quadlets, parts])}
+
+        error ->
+          error
+      end
     end
   end
 end

@@ -40,4 +40,9 @@ defmodule Kerilex.Attachment.IndexedWitnessSigs do
         error
     end
   end
+
+  import Kerilex.Attachment.IndexedSigs
+
+  encode_sigs(@code, Kerilex.Attachment.IndexedWitnessSig)
+
 end

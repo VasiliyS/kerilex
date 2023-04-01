@@ -111,7 +111,11 @@ defmodule Kerilex.KEL do
 
   @saidify_labels %{"icp" => ["d", "i"], "dip" => ["d", "i"]}
 
-  def get_said(type, pmsg) do
+  @doc """
+      takes a type (e.g. 'icp', 'dip', etc)
+      and calculates of the KERI message
+  """
+  def get_said(type, %OO{} = pmsg) do
     @saidify_labels
     |> Map.fetch(type)
     |> case do
@@ -130,8 +134,8 @@ defmodule Kerilex.KEL do
     ll
     |> put_placeholders(pmsg)
     |> case do
-      {:error, reason} ->
-        {:error, reason}
+      {:error, _reason} = err ->
+        err
 
       msg_with_placeholders ->
         calc_said(msg_with_placeholders)
@@ -166,7 +170,7 @@ defmodule Kerilex.KEL do
   defp calc_said(pmsg) do
     with {:ok, emsg} <- pmsg |> Jason.encode(),
          hash = emsg |> Blake3.hash(),
-         {:ok, hash_b64} <- hash |> Basic.binary_to_blake3_dig() do
+         {:ok, hash_b64} <- hash |> Basic.to_qb64_blake3_dig() do
       {:ok, hash_b64}
     else
       error ->
@@ -217,9 +221,9 @@ defmodule Kerilex.KEL do
     end
   end
 
-  defp check_idx_sigs(parsed_msg, serd_msg, wit_sigs, key) do
-    with {:ok, backers_lst} <- parsed_msg |> get_list_of(key),
-         :ok <- backers_lst |> validate_idx_sigs(wit_sigs, serd_msg) do
+  defp check_idx_sigs(parsed_msg, serd_msg, idx_sigs, key) do
+    with {:ok, verkey_lst} <- parsed_msg |> get_list_of(key),
+         :ok <- verkey_lst |> validate_idx_sigs(idx_sigs, serd_msg) do
     end
   end
 

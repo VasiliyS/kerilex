@@ -5,26 +5,10 @@ defmodule Kerilex.Crypto.Ed25519Sig do
   alias Kerilex.Derivation.Basic, as: QB64
   alias Kerilex.Attachment.Number
   alias Kerilex.Crypto.Ed25519, as: Ed
-  # alias Kerilex.Attachment.IndexedControllerSig, as: ICS
+  import Kerilex.Constants
 
-  #defstruct sig: <<>>
-  @sig_type Ed.type
-
-  def indexed_sign(data, ind, sk) do
-    with {:ok, ind} <- Number.int_to_b64(ind, maxpadding: 1),
-         sig <- sign(data, sk) do
-      QB64.binary_to_qb64("A#{ind}", sig, 64)
-    end
-  end
-
-  def self_sign(data, sk) do
-    sig = sign(data, sk)
-    QB64.binary_to_qb64("0B", sig, 64)
-  end
-
-  defp sign(data, sk) when is_binary(sk) and byte_size(sk) == 64 do
-    :enacl.sign_detached(data, sk)
-  end
+  # defstruct sig: <<>>
+  @sig_type Ed.type()
 
   def code_match?(<<"A", _::bitstring>>), do: true
   def code_match?(<<"0B", _::bitstring>>), do: true
@@ -62,9 +46,37 @@ defmodule Kerilex.Crypto.Ed25519Sig do
     {:ok, {@sig_type, sig}, att_rest}
   end
 
-
   def valid?({@sig_type, sig}, data, pk) do
     sig
-    |>:enacl.sign_verify_detached(data, pk)
+    |> :enacl.sign_verify_detached(data, pk)
+  end
+
+  #############  signing functions ################
+
+  def sign(data, sk) when is_binary(sk) and byte_size(sk) == 64 do
+    {@sig_type, :enacl.sign_detached(data, sk)}
+  end
+
+  ############ encoding functions #################
+
+  def to_idx_sig(sig, ind, nil) do
+    with {:ok, b64ind} <- ind |> Number.int_to_b64(maxpadding: 1),
+         {:ok, _} = res <- QB64.binary_to_qb64("A#{b64ind}", sig, 64, iodata: true) do
+      res
+    else
+      error ->
+        error
+    end
+  end
+
+  def to_idx_sig(sig, ind, oind) do
+    with {:ok, b64ind} <- ind |> Number.int_to_b64(maxpadding: 2),
+         {:ok, b64oind} <- oind |> Number.int_to_b64(maxpadding: 2),
+         {:ok, _} = res <- QB64.binary_to_qb64("2A#{b64ind}#{b64oind}", sig, 64, iodata: true) do
+      res
+    else
+      error ->
+        error
+    end
   end
 end

@@ -9,7 +9,7 @@ defmodule Kerilex.Crypto.Ed25519 do
   const type, :ed25519
 
   def new_keypair(<<"0A", _::binary>> = salt) do
-    sb = Basic.qb64_to_binary(salt)
+    sb = Basic.from_qb64(salt)
 
     comment("""
     taken from keripy coring.py GenerateSigners
@@ -36,14 +36,21 @@ defmodule Kerilex.Crypto.Ed25519 do
     struct(__MODULE__, kp)
   end
 
+
   def new_keypair(<<"A", _::binary>> = seed) do
     kp =
       seed
-      |> Basic.qb64_to_binary()
+      |> Basic.from_qb64()
       |> :enacl.sign_seed_keypair()
 
     struct(__MODULE__, kp)
   end
 
+  def new_keypair(raw_seed) when byte_size(raw_seed) == 32 do
+    kp = :enacl.sign_seed_keypair(raw_seed)
+
+    struct(__MODULE__, kp)
+
+  end
 
 end

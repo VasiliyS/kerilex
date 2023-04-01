@@ -4,6 +4,7 @@ defmodule Kerilex.Attachment.Signature do
   """
   alias Kerilex.Attachment.Count
   alias Kerilex.Crypto.Ed25519Sig, as: EdSig
+  alias Kerilex.Crypto.Ed25519, as: Ed
 
   def nontrans_receipts(receipt_pairs)
       when is_list(receipt_pairs) do
@@ -60,5 +61,15 @@ defmodule Kerilex.Attachment.Signature do
       error ->
         error
     end
+  end
+
+  @ed_sig_type Ed.type()
+
+  def to_idx_sig({@ed_sig_type, sig}, ind, oind) do
+    EdSig.to_idx_sig(sig, ind, oind)
+  end
+
+  def to_idx_sig({type, _sig}, _ind, _oind) when is_atom(type) do
+    {:error, "unsupported sig type: #{Atom.to_string(type)}"}
   end
 end
