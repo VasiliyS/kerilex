@@ -1,10 +1,10 @@
 defmodule Kerilex.Attachment.NonTransPrefix do
-@moduledoc """
-  parser for non transferable 'B' prefixes\n
-  Ed25519 non-transferable prefix public signing verification key
-"""
+  @moduledoc """
+    parser for non transferable 'B' prefixes\n
+    Ed25519 non-transferable prefix public signing verification key
+  """
 
-@code "B"
+  @code "B"
 
   def parse(<<att_rest::bitstring>>) do
     if match?(<<@code, _::bitstring>>, att_rest) do
@@ -13,7 +13,8 @@ defmodule Kerilex.Attachment.NonTransPrefix do
         {:ok, pre, att_rest}
       rescue
         MatchError ->
-          {:error, "couldn't parse '#{@code}' prefix, wanted 44 bytes, got:#{byte_size(att_rest)} "}
+          {:error,
+           "couldn't parse '#{@code}' prefix, wanted 44 bytes, got:#{byte_size(att_rest)} "}
       end
     else
       <<code, _::bitstring>> = att_rest
@@ -21,19 +22,33 @@ defmodule Kerilex.Attachment.NonTransPrefix do
     end
   end
 
+  ################  encoding ###########################
+
   alias Kerilex.Derivation.Basic
 
- def to_binary!(pref) do
-  pref
-  |> to_binary()
-  |> case do
-    {:error, reason } ->
-      raise ArgumentError, reason
-    val ->
-      val
+  def encode(pref) do
+    pref
+    |> then( &Basic.binary_to_qb64(@code,&1,44))
+    |> case do
+      {:error, reason} ->
+        {:error, "failed to encode prefix '#{pref}': #{reason}"}
+
+      enc ->
+        {:ok, enc}
+    end
   end
 
- end
+  def to_binary!(pref) do
+    pref
+    |> to_binary()
+    |> case do
+      {:error, reason} ->
+        raise ArgumentError, reason
+
+      val ->
+        val
+    end
+  end
 
   def to_binary(<<"B", value::bitstring>>) do
     Basic.decode_qb64_value(value, 1, 0, 44, 0)
@@ -46,5 +61,4 @@ defmodule Kerilex.Attachment.NonTransPrefix do
   defp bad_code_msg(code) do
     "can't parse pref, expected: '#{@code}', got: '#{code}...' "
   end
-
 end

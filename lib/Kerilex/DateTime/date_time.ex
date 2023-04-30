@@ -14,6 +14,14 @@ defmodule Kerilex.DateTime do
 
   #@rep_chars  :binary.compile_pattern(["c", "d", "p"])
 
+  @spec parse(binary) ::
+          {:error,
+           :incompatible_calendars
+           | :invalid_date
+           | :invalid_format
+           | :invalid_time
+           | :missing_offset}
+          | {:ok, DateTime.t(), integer}
   def parse(enc_dt_str) do
       enc_dt_str
       |> String.replace(["c", "d", "p"], fn c ->

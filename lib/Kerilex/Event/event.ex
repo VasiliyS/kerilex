@@ -4,32 +4,39 @@ defmodule Kerilex.Event do
 
   """
   import Kerilex.Constants
-  alias Kerilex.Derivation.Basic
   alias Kerilex.Crypto
   alias Jason.OrderedObject, as: OO
 
   @said_ph Kerilex.said_placeholder(44)
-  @saidify_labels %{"icp" => ["d", "i"], "dip" => ["d", "i"]}
+  @saidify_labels %{"icp" => [:d, :i], "dip" => [:d, :i]}
   @keri_ver "KERI10"
 
   const(keri_version_str, @keri_ver <> "JSON000000_")
 
-
-
-
   def serialize(%OO{} = event) do
+    with type when type != nil <- event[:t],
+         {:ok, said, prepped_event} <- event |> marshall(type) do
+      {:ok,
+       prepped_event
+       |> String.replace(@said_ph, said), said}
+    else
+      nil ->
+        {:error, "malformed KERI event, no type ('t') specified"}
 
-    {said, prepped_event} =
-      event[:t]
-      |> marshall(event)
-
-  {:ok,
-    prepped_event
-    |> String.replace(@said_ph, said),
-    said}
+      {:error, reason} ->
+        {:error, "failed to serialize the event: #{reason}"}
+    end
   end
 
-  defp marshall(type, %OO{} = pmsg) do
+  defp marshall(event, type) do
+
+    type =
+    if type == "icp" do
+      adjust_for_backer_icp(event)
+    else
+      type
+    end
+
     @saidify_labels
     |> Map.fetch(type)
     |> case do
@@ -37,52 +44,73 @@ defmodule Kerilex.Event do
         ll
 
       _ ->
-        ["d"]
+        [:d]
     end
-    |> then(&saidify(pmsg, placeholders: &1))
+    |> saidify(event)
   end
 
+  # special logic for inception events that are done for witnesses/backers
+  # they are using non-transferable prefix and so "i" has to be the same as the key
+  defp adjust_for_backer_icp(event) do
+    if event[:i] != "", do: "_icp", else: event[:t]
+  end
 
-  defp saidify(event, opts ) do
+  defp saidify(labels_to_replace, event) do
     # replace all labels for hash calculation
     # ( e.d. 'd' for digest, 'i' for prefix in icp event, etc)
-    labels_to_replace = Keyword.get(opts, :placeholders)
 
-    prepped_event = #TODO(VS): reuse saidify logic from KEL module.
-      Enum.reduce(
-        labels_to_replace,
-        event,
-        &put_said_placeholder/2
-      )
-      |> Jason.encode!()
+    # TODO(VS): can I re-use some of the logic from the parser?
 
-    size_str =
-      prepped_event
-      |> byte_size()
-      |> int_to_hex()
-      |> String.pad_leading(6, "0")
+    with {:ok, prepped_event} <-
+           labels_to_replace |> saidify_labels(event) ,
+         {:ok, enc_event} <- Jason.encode(prepped_event) do
+      enc_event = enc_event |> calc_and_update_size()
+      said = enc_event |> Crypto.hash_and_encode!()
+      {:ok, said, enc_event}
+    end
+  end
 
-    prepped_event =
-      prepped_event
-      |> String.replace(~r/N000000_/, "N" <> size_str <> "_", global: false)
+  defp calc_and_update_size(enc_event) do
+    enc_event
+    |> byte_size()
+    |> int_to_hex()
+    |> String.pad_leading(6, "0")
+    |> then(&String.replace(enc_event, ~r/000000/, &1, global: false))
+  end
 
-    said =
-      prepped_event
-      |> Crypto.hash_and_encode!()
+  defp saidify_labels(labels, event) do
+    labels
+    |> Enum.reduce_while(
+      {:ok, event},
+      fn label, {:ok, event} ->
+        put_said_placeholder(label, event)
+        |> case do
+          {:ok, _} = res ->
+            {:cont, res}
 
-    {said, prepped_event}
+          error ->
+            {:halt, error}
+        end
+      end
+    )
   end
 
   defp put_said_placeholder(label, event) do
     event
     |> OO.get_and_update(
-      String.to_atom(label),
+      label,
       fn val ->
         new_val = if val != nil, do: @said_ph, else: :pop
         {val, new_val}
       end
     )
-    |> then(fn {_nv, updt_evnt} -> updt_evnt end)
+    |> case do
+      {nil, _} ->
+        {:error, "event has no label '#{Atom.to_string(label)}'"}
+
+      {_, prepd_event} ->
+        {:ok, prepd_event}
+    end
   end
 
   @doc """
@@ -91,5 +119,4 @@ defmodule Kerilex.Event do
   def int_to_hex(number) do
     number |> Integer.to_string(16) |> String.downcase()
   end
-
 end

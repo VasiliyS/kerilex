@@ -2,29 +2,13 @@ defmodule Kerilex.Attachment.Signature do
   @moduledoc """
     create proper CESR Attachments for signatures
   """
-  alias Kerilex.Attachment.Count
   alias Kerilex.Crypto.Ed25519Sig, as: EdSig
   alias Kerilex.Crypto.Ed25519, as: Ed
 
-  def nontrans_receipts(receipt_pairs)
-      when is_list(receipt_pairs) do
-    pairs_count = length(receipt_pairs)
-
-    {receipts_len, receipts} =
-      Enum.reduce(
-        receipt_pairs,
-        {0, ""},
-        fn {pre, sig}, {rl, receipts} ->
-          rl = rl + byte_size(pre) + byte_size(sig)
-          {rl, receipts <> pre <> sig}
-        end
-      )
-
-    {:ok, pc} = Count.to_nontrans_receipts_couples(pairs_count)
-    {:ok, qc} = Count.to_material_quadlets(byte_size(pc) + receipts_len)
-
-    qc <> pc <> receipts
-  end
+  @typedoc """
+    tuple {sig_type, signature}
+  """
+  @type t :: {:ed25519, binary()}
 
   def parse(<<att::bitstring>>, sig_container) do
     # TODO(VS): handle other signature types
@@ -63,6 +47,8 @@ defmodule Kerilex.Attachment.Signature do
     end
   end
 
+  ################################ encoding #########################
+
   @ed_sig_type Ed.type()
 
   def to_idx_sig({@ed_sig_type, sig}, ind, oind) do
@@ -70,6 +56,21 @@ defmodule Kerilex.Attachment.Signature do
   end
 
   def to_idx_sig({type, _sig}, _ind, _oind) when is_atom(type) do
+    unsup_error(type)
+  end
+
+
+  @spec to_signature({atom, any}) ::
+          {:error, <<_::64, _::_*8>>} | {:ok, binary | [bitstring, ...]}
+  def to_signature({@ed_sig_type, sig}) do
+      EdSig.encode(sig)
+  end
+
+  def to_signature({type, _sig}) when is_atom(type) do
+    unsup_error(type)
+  end
+
+  defp unsup_error(type) do
     {:error, "unsupported sig type: #{Atom.to_string(type)}"}
   end
 end

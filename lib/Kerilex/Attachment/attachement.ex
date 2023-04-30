@@ -3,7 +3,6 @@ defmodule Kerilex.Attachment do
     Encodes (TODO) and Parses CESR Attachment
   """
 
-  alias Kerilex.Derivation.Basic
   alias Kerilex.Attachment.Number
   require Kerilex.Constants
   import Kerilex.Constants
@@ -101,8 +100,8 @@ defmodule Kerilex.Attachment do
   end
 
   defp apply_parser(parser, {pam, rest_attach}) do
-    if apply(parser, :code_match?, [rest_attach]) do
-      {:ok, st, rest_attach} = apply(parser, :parse, [rest_attach])
+    if parser.code_match?(rest_attach) do
+      {:ok, st, rest_attach} = parser.parse(rest_attach)
       pa = Map.put(pam, Map.fetch!(@parsers, parser), st)
       {pa, rest_attach, true}
     else
@@ -111,26 +110,28 @@ defmodule Kerilex.Attachment do
   end
 
   #############   encoding functions ###############
-  def encode(parts) when is_list(parts) do
-    encode(to_string(parts))
+
+  def encode(parts, opts \\ [to_iodata: false]) do
+    IO.iodata_length(parts)
+    |> to_size_quadlets()
+    |> case do
+      {:ok, size_quadlets} ->
+        encoding = [@code, size_quadlets, parts]
+        encoding = if(opts[:iodata], do: encoding, else: encoding |> IO.iodata_to_binary())
+        {:ok, encoding}
+
+      error ->
+        error
+    end
   end
 
-  def encode(parts) when is_binary(parts) do
-    ps = byte_size(parts)
-
-    if rem(ps, 4) != 0 do
+  defp to_size_quadlets(size_bytes) do
+    if rem(size_bytes, 4) != 0 do
       {:error, "badly formed data, size should be divisible by 4"}
     else
-      ps
+      size_bytes
       |> div(4)
       |> Number.int_to_b64(maxpadding: 2)
-      |> case do
-        {:ok, size_quadlets} ->
-         {:ok, to_string([@code, size_quadlets, parts])}
-
-        error ->
-          error
-      end
     end
   end
 end

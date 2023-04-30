@@ -6,9 +6,20 @@ defmodule Kerilex.Attachment.NonTransReceiptCouple do
   """
 
   alias Kerilex.Attachment.Signature
+  alias Kerilex
   alias Kerilex.Attachment.NonTransPrefix, as: NTP
 
   defstruct pre: nil, sig: nil
+
+  @type t :: %__MODULE__{
+          pre: Kerilex.pre(),
+          sig: Signature.t()
+        }
+
+  @spec new(Kerilex.pre(), Signature.t()) :: Kerilex.Attachment.NonTransReceiptCouple.t()
+  def new(pre, sig) do
+    %__MODULE__{pre: pre, sig: sig}
+  end
 
   def parse(<<att::bitstring>>) do
     with {:ok, pre, att_rest} <- parse_pre(att),
@@ -28,5 +39,22 @@ defmodule Kerilex.Attachment.NonTransReceiptCouple do
   def valid?(%__MODULE__{pre: pre, sig: sig}, data) do
     pk = pre |> NTP.to_binary!()
     sig |> Signature.valid?(data, pk)
+  end
+
+  ############# encoding ############
+
+  def encode(%__MODULE__{pre: pre, sig: sig}) do
+    sig
+    |> Signature.to_signature()
+    |> case do
+      {:ok, sig_enc} ->
+        {:ok, [pre, sig_enc]}
+      {:error, reason} ->
+        {:error, "failed to encode NonTransReceiptCouple: #{reason}"}
+    end
+  end
+
+  def encode(_something) do
+    {:error, "bad argument, expected %NonTransReceiptCouple"}
   end
 end

@@ -8,6 +8,12 @@ defmodule Kerilex do
   ## Examples
 
   """
+
+  @typedoc """
+   QB64 transferable or non-transferable prefix
+  """
+  @type pre :: <<_::44>>
+
   @placeholder_char "#"
 
   def kel_sample do
@@ -27,7 +33,6 @@ defmodule Kerilex do
 
     res
   end
-
 
   def get_said(kel) when is_binary(kel) do
     kel
@@ -89,6 +94,4 @@ defmodule Kerilex do
 
     List.to_string(lst)
   end
-  
-  
 end

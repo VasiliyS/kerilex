@@ -4,7 +4,6 @@ defmodule Kerilex.Crypto do
   """
 
   import Comment
-  alias Kerilex.Crypto.Ed25519Sig
   alias Kerilex.Derivation.Basic
   alias Kerilex.Crypto.Ed25519, as: Ed
   alias Kerilex.Crypto.Signer

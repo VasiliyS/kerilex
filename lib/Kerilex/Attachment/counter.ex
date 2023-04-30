@@ -2,6 +2,8 @@ defmodule Kerilex.Attachment.Count do
   @moduledoc """
     defines primitives to deal with Keri's "counter"
     codes, e.g. -V##, -C##, etc.
+    TODO(VS): deprecate, all counter logic is handled in specific types
+    e.g.: IndexedControllerSigs, etc.
   """
   alias Kerilex.Attachment.Number
 

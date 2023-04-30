@@ -15,7 +15,7 @@ defmodule Kerilex.Attachment.IndexedControllerSig do
   """
   @type t :: %__MODULE__{
           sig: {:atom, binary()},
-          ind: non_neg_integer | nil,
+          ind: non_neg_integer ,
           oind: non_neg_integer | nil
         }
 

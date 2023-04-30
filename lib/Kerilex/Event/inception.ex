@@ -74,26 +74,66 @@ defmodule Kerilex.Event.Inception do
 
   """)
 
+  comment("""
+   example of a witness ( non-trans prefix)'s inception
+  {
+    "v": "KERI10JSON0000fd_",
+    "t": "icp",
+    "d": "EDyvAMpba1ZJbgvwxb6hUBsycgsQfxUdk-Yi2AYod4k7",
+    "i": "BP-nOCxB--MKSgwTXyLj01zA5jkG0Gb-8h-SHDX4qCJO",
+    "s": "0",
+    "kt": "1",
+    "k": [
+      "BP-nOCxB--MKSgwTXyLj01zA5jkG0Gb-8h-SHDX4qCJO"
+    ],
+    "nt": "0",
+    "n": [],
+    "bt": "0",
+    "b": [],
+    "c": [],
+    "a": []
+  }
+
+  """)
+
   @conf_eo :eo
   @conf_dnd :dnd
   @conf_nb :nb
 
   @config_opts %{@conf_dnd => "DND", @conf_eo => "EO", @conf_nb => "NB"}
 
-  def event(kts, keys, nts, next_key_digs, backers) do
-
-    {:ok, eo } = event_obj(kts, keys, nts, next_key_digs, backers)
+  def encode(kts, keys, nts, next_key_digs, backers) do
+    {:ok, eo} = event_obj(kts, keys, nts, next_key_digs, backers)
 
     eo
     |> Event.serialize()
   end
 
-  def event_obj(kts, keys, nts, next_key_digs, backers) do
+  def encode(<<"B", _::binary-size(43)>> = nt_pref) do
+    {:ok, bo} =
+      event_obj(
+        "1",
+        [nt_pref],
+        "0",
+        [],
+        [],
+        false
+      )
+
+    bo
+    |> Event.serialize()
+  end
+
+  def encode(pref) do
+    {:error, "bad argument, required a non transferable prefix, got: #{pref} "}
+  end
+
+  defp event_obj(kts, keys, nts, next_key_digs, backers, trans \\ true) do
     msg_vals = [
       v: Event.keri_version_str(),
       t: ilk(),
       d: "",
-      i: "",
+      i: if(trans, do: "", else: keys |> hd),
       s: "0",
       kt: kts,
       k: keys,

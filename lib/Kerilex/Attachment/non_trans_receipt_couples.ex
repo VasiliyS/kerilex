@@ -9,6 +9,12 @@ defmodule Kerilex.Attachment.NonTransReceiptCouples do
   alias Kerilex.Attachment.Number, as: B64
   alias Kerilex.Attachment.NonTransReceiptCouple, as: RC
 
+
+  @typedoc """
+      list of Non-Transferable Receipt Couples
+  """
+  @type t :: [RC.t()]
+
   @code "-C"
 
   def code_match?(<<@code, _rest::bitstring>>), do: true
@@ -16,8 +22,8 @@ defmodule Kerilex.Attachment.NonTransReceiptCouples do
 
   def parse(<<@code, couple_count::binary-size(2), att_rest::bitstring>>) do
     with {:ok, rc_count} <- B64.b64_to_int(couple_count),
-         {:ok, _, _ } = res <- get_receipt_couples(rc_count, att_rest, []) do
-     res
+         {:ok, _, _} = res <- get_receipt_couples(rc_count, att_rest, []) do
+      res
     else
       error ->
         error
@@ -39,6 +45,7 @@ defmodule Kerilex.Attachment.NonTransReceiptCouples do
   end
 
   alias Kerilex.Attachment, as: Att
+
   def check(receipt_couples, serd_msg) when is_list(receipt_couples) do
     receipt_couples
     |> Enum.with_index()
@@ -60,5 +67,15 @@ defmodule Kerilex.Attachment.NonTransReceiptCouples do
       {false, idx} ->
         {:error, "NonTransReceiptCouple idx: #{idx} failed sig check"}
     end
+  end
+
+  #####################  encoding #########################
+  alias Kerilex.Attachment.ListEncoder, as: LE
+
+
+  @spec encode([RC.t()], keyword()) :: {:error, any} | {:ok, binary | iodata()}
+  def encode(receipt_pairs, opts \\ [to: :iodata])
+      when is_list(receipt_pairs) do
+    LE.encode(@code, Kerilex.Attachment.NonTransReceiptCouple, receipt_pairs, opts)
   end
 end

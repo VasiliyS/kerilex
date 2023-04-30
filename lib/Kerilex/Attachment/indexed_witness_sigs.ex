@@ -41,8 +41,10 @@ defmodule Kerilex.Attachment.IndexedWitnessSigs do
     end
   end
 
-  import Kerilex.Attachment.IndexedSigs
+  alias Kerilex.Attachment.ListEncoder, as: LE
 
-  encode_sigs(@code, Kerilex.Attachment.IndexedWitnessSig)
+  def encode(sigs, opts \\ [to: :iodata]) do
+   LE.encode(@code, Kerilex.Attachment.IndexedWitnessSig, sigs, opts )
+  end
 
 end

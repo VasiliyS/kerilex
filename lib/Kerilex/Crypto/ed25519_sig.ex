@@ -79,4 +79,8 @@ defmodule Kerilex.Crypto.Ed25519Sig do
         error
     end
   end
+
+  def encode(sig) do
+    QB64.binary_to_qb64("0B", sig, 64, iodata: true)
+  end
 end

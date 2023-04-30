@@ -1,0 +1,25 @@
+
+watcher:
+salt : "0AAhYttpeWnmDwLLiNiMk6mk"
+pre: "EE_JGQw7kEYNBI-qY8QLXZimP9W5M-3lguOduY1w-v7y"
+
+tr_watcher
+salt: 0AAym6vLDzliBVuF6rfATME6
+
+witness:
+salt  0ADvE_Mq6699Jcp5X0m8ncp6
+pre BP-nOCxB--MKSgwTXyLj01zA5jkG0Gb-8h-SHDX4qCJO
+-n wit1 -a wit1
+oobi http://127.0.0.1:5631/oobi/BP-nOCxB--MKSgwTXyLj01zA5jkG0Gb-8h-SHDX4qCJO
+
+
+salt 0AB0-48nEdEjKuHp3sUzLD2c
+pre BAOJDnw0lhSUTO7Tgz_zvc6O_F4mK6KfIXOshDSknu4c
+n wit2 -a wit2 
+
+oobi http://127.0.0.1:5731/oobi/BAOJDnw0lhSUTO7Tgz_zvc6O_F4mK6KfIXOshDSknu4c
+
+prefix:
+salt 0AB9LnVMJbbCx8uQ_5hqoqR0
+pre ECiTx4B-xr0XDsxGB2iQwPT7GrhPz7t7bnIZO-SbdOxg
+1st pk : DLk4AvlBfHRgcpDRJ62QCv7ePHudS8rjtaB9-hPxh1h5

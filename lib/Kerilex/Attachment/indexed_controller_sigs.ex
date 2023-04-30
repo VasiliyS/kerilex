@@ -51,7 +51,7 @@ defmodule Kerilex.Attachment.IndexedControllerSigs do
         if opts[:to] == :iodata do
           encoding
         else
-          encoding |> to_string
+          encoding |> IO.iodata_to_binary()
         end
 
       {:ok, res}
@@ -61,7 +61,7 @@ defmodule Kerilex.Attachment.IndexedControllerSigs do
     end
   end
 
-  defp encode_sigs(sigs) do
+  def encode_sigs(sigs) do
     sigs
     |> Enum.reduce_while(
       [],

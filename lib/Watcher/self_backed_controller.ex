@@ -1,4 +1,4 @@
-defmodule Watcher.Controller do
+defmodule Watcher.SefBackedController do
   defstruct pre: nil, signer: nil, nsigner: nil, backers: [], inception: nil
 
   alias Kerilex.Event.Inception, as: Icp
@@ -31,7 +31,7 @@ defmodule Watcher.Controller do
       for b <- ctrl.backers, into: [] do
         b.qb64
       end
-    {:ok, serd_event, pre} = Icp.event([kt], [verkey], [nts], ndigs, backers)
+    {:ok, serd_event, pre} = Icp.encode([kt], [verkey], [nts], ndigs, backers)
 
     {:ok, %__MODULE__{ctrl | pre: pre, inception: serd_event}}
   end
