@@ -28,6 +28,7 @@ defmodule Kerilex.MixProject do
       {:blake3, path: "../../elixir/blake3"},
       {:enacl, "~> 1.2"},
       {:jason, "~> 1.4.0"},
+      {:ratio, "~> 3.0"},
       {:finch, "~> 0.15.0"},
       {:mint, "1.5.1"},
       {:benchee, "~> 1.1", only: :dev }

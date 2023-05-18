@@ -84,9 +84,8 @@ defmodule Kerilex.KEL do
          {:ok, dig} <-
            OO.fetch(pmsg, "d")
            |> wrap_error("msg has no digest"),
-         {:ok, said} <- type |> get_said(pmsg),
-         :ok <- said |> comp_said(dig) do
-      :ok
+         {:ok, said} <- type |> get_said(pmsg) do
+      said |> comp_said(dig)
     else
       {:error, reason} ->
         {:error, "said validity check failed: #{reason}"}
@@ -113,7 +112,7 @@ defmodule Kerilex.KEL do
 
   @doc """
       takes a type (e.g. 'icp', 'dip', etc)
-      and calculates of the KERI message
+      and calculates said of the KERI message
   """
   def get_said(type, %OO{} = pmsg) do
     @saidify_labels
@@ -197,19 +196,15 @@ defmodule Kerilex.KEL do
            keri_msg
            |> Map.fetch(Att.idx_wit_sigs())
            |> wrap_error("missing witness signatures"),
-         :ok <- parsed_msg |> check_backer_sigs(serd_msg, wit_sigs),
+         {:ok, b_indices} <- parsed_msg |> check_backer_sigs(serd_msg, wit_sigs),
+         :ok <- parsed_msg |> check_backer_threshold(b_indices),
          {:ok, ctrl_sigs} <-
            keri_msg
            |> Map.fetch(Att.idx_ctrl_sigs())
            |> wrap_error("missing controller signatures"),
-         :ok <- parsed_msg |> check_ctrl_sigs(serd_msg, ctrl_sigs) do
-      :ok
-    else
-      error ->
-        error
+         {:ok, c_indices} <- parsed_msg |> check_ctrl_sigs(serd_msg, ctrl_sigs) do
+      parsed_msg |> check_ctrl_threshold(c_indices)
     end
-
-    :ok
   end
 
   defp check_backer_sigs(parsed_msg, serd_msg, wit_sigs) do
@@ -217,13 +212,15 @@ defmodule Kerilex.KEL do
     |> case do
       {:error, reason} ->
         {:error, "witness signature check failed:" <> reason}
-      res -> res
+
+      res ->
+        res
     end
   end
 
   defp check_idx_sigs(parsed_msg, serd_msg, idx_sigs, key) do
-    with {:ok, verkey_lst} <- parsed_msg |> get_list_of(key),
-         :ok <- verkey_lst |> validate_idx_sigs(idx_sigs, serd_msg) do
+    with {:ok, verkey_lst} <- parsed_msg |> get_list_of(key) do
+      verkey_lst |> validate_idx_sigs(idx_sigs, serd_msg)
     end
   end
 
@@ -249,12 +246,13 @@ defmodule Kerilex.KEL do
 
     idx_sigs
     |> Enum.reduce_while(
-      nil,
-      fn sig, _acc ->
+      _acc = {:ok, []},
+      fn sig, {:ok, indices} ->
         validate_idx_sig(nok, key_lst, sig, data)
         |> case do
           :ok ->
-            {:cont, :ok}
+            %{ind: sind} = sig
+            {:cont, {:ok, [sind | indices]}}
 
           error ->
             {:halt, error}
@@ -265,9 +263,9 @@ defmodule Kerilex.KEL do
 
   alias Kerilex.Attachment.Signature, as: Sig
 
-  defp validate_idx_sig(nok, key_lst, %{sig: sig, ind: sind}, data) do
-    if sind > nok do
-      {:error, "sig ind error: got: #{sind}, total keys: #{nok}"}
+  defp validate_idx_sig(no_keys, key_lst, %{sig: sig, ind: sind}, data) do
+    if sind > no_keys do
+      {:error, "sig ind error: got: #{sind}, total keys: #{no_keys}"}
     else
       key_qb64 = key_lst |> Enum.at(sind)
       Sig.check_with_qb64key(sig, data, key_qb64)
@@ -275,12 +273,49 @@ defmodule Kerilex.KEL do
   end
 
   defp check_ctrl_sigs(parsed_msg, serd_msg, ctrl_sigs) do
-
     check_idx_sigs(parsed_msg, serd_msg, ctrl_sigs, "k")
     |> case do
       {:error, reason} ->
         {:error, "controller signature check failed:" <> reason}
-      res -> res
+
+      res ->
+        res
+    end
+  end
+
+  ################## threshold validation #######################
+
+  defp check_backer_threshold(parsed_msg, indices) do
+    with {:ok, bt} <-
+           parsed_msg
+           |> OO.fetch("bt")
+           |> wrap_error("backer threshold entry ('bt') is missing"),
+         {t, ""} <-
+           bt
+           |> Integer.parse(16)
+           |> wrap_error("can't parse 'bt' as hex int, got: #{inspect(bt)}") do
+      if(length(indices) < t) do
+        {:error,
+         "number of backers sigs (#{length(indices)}) is lower than the required threshold: #{t}"}
+      else
+        :ok
+      end
+    end
+  end
+
+  alias Kerilex.Crypto.KeyTally
+
+  defp check_ctrl_threshold(parsed_msg, indices) do
+    with {:ok, kt} <-
+           parsed_msg
+           |> OO.fetch("kt")
+           |> wrap_error("key threshold entry ('kt') is missing"),
+         {:ok, t} <- KeyTally.new(kt) do
+      if t |> KeyTally.satisfy?(indices) do
+        :ok
+      else
+        {:error, "key threshold: #{kt} wasn't satisfied by sig indices: #{inspect(indices)}"}
+      end
     end
   end
 end
