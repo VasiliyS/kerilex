@@ -1,4 +1,4 @@
-defmodule Kerilex.KEL do
+defmodule Kerilex.KELParser do
   @moduledoc """
     parser functions for a KERI KEL data
   """
@@ -64,13 +64,17 @@ defmodule Kerilex.KEL do
     end
   end
 
+  @doc """
+  Parses serialized (json) message from the parser's output (`keri_msg`), validates it's `said`.
+
+  Returns `{error: reason}` or `{:ok, parsed_msg}`. `parsed_msg` is `%Jason.OrderedObject`
+  """
   def check_msg_integrity(%{serd_msg: serd_msg} = keri_msg) do
     with {:ok, parsed_msg} <-
            serd_msg
            |> Jason.decode(objects: :ordered_objects),
-         :ok <- parsed_msg |> validate_said(),
-         :ok <- parsed_msg |> check_sigs(keri_msg) do
-      {:ok, Map.put(keri_msg, :parsed_msg, parsed_msg)}
+         :ok <- parsed_msg |> validate_said() do
+      {:ok, parsed_msg}
     else
       {:error, reason} ->
         {:error, "msg integrity check failed: #{reason} "}
@@ -177,11 +181,18 @@ defmodule Kerilex.KEL do
     end
   end
 
-  def check_sigs(parsed_msg, %{} = keri_msg) do
-    if keri_msg |> Map.has_key?(Att.nt_rcpt_couples()) do
-      check_witness_rcpts(keri_msg)
+  @doc """
+   Verifies signatures on parsed messages that have required keys, backers, etc
+   this includes `rpy` and establishment messages (e.g. `icp`, `dip`, `rot` and `drt`)
+
+
+   Returns `:ok` or `{:error, reason}`
+  """
+  def check_sigs_on_stateful_msg(msg_obj, %{} = parsed_msg) do
+    if parsed_msg |> Map.has_key?(Att.nt_rcpt_couples()) do
+      check_witness_rcpts(parsed_msg)
     else
-      parsed_msg |> check_all_idx_sigs(keri_msg)
+      msg_obj |> check_all_idx_sigs(parsed_msg)
     end
   end
 
