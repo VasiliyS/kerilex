@@ -125,8 +125,11 @@ defmodule Watcher.KeyStateStore do
   def maybe_update_ks(prefix, sn, event) do
     Mnesia.dirty_read(@ks_table, prefix)
     |> case do
-      [] ->
+      [] when sn == 0 ->
         update_ks(prefix, sn, event)
+
+      [] when sn > 0  ->
+        :out_of_order
 
       [{_table, _pref, stored_sn, _state}] ->
         if stored_sn <= sn do
@@ -157,10 +160,10 @@ defmodule Watcher.KeyStateStore do
   end
 
   @spec maybe_update_kel({Kerilex.pre(), integer()}, map()) ::
-          :ok
+          {:ok, binary()}
           | :not_updated
-          | :out_of_order
-          | {:duplicate, String.t(), integer()}
+          | {:out_of_order, binary()}
+          | {:duplicate, String.t(), String.t()}
           | {:error, String.t()}
   def maybe_update_kel({pref, sn} = key, event) do
     Mnesia.dirty_read(@kel_table, key)
@@ -172,11 +175,11 @@ defmodule Watcher.KeyStateStore do
         else
           # validate_config couldn't find icp event for the prefix
           :no_icp_event ->
-            :out_of_order
+            {:out_of_order, pref} # missing said is the same as pref
 
           # returned by check_parent
           :no_parent_event ->
-            :out_of_order
+            {:out_of_order, event["p"]}
 
           error ->
             error
@@ -196,7 +199,7 @@ defmodule Watcher.KeyStateStore do
 
   alias Kerilex.Event
 
-  defp check_parent(pref, sn, event) do
+  def check_parent(pref, sn, event) do
     Mnesia.dirty_read(@kel_table, {pref, sn - 1})
     |> case do
       [] ->
@@ -251,7 +254,7 @@ defmodule Watcher.KeyStateStore do
     Mnesia.transaction(updater)
     |> case do
       {:atomic, :ok} ->
-        :ok
+        {:ok , event["d"]}
 
       {:aborted, reason} ->
         {:error, "failed to write new kel entry for pref '#{key |> elem(0)}', #{inspect(reason)}"}

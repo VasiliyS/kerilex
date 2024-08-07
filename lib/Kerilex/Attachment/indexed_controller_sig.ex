@@ -11,7 +11,7 @@ defmodule Kerilex.Attachment.IndexedControllerSig do
   - `sig:`: is a tuple {type,sig}, type is e.g. :ed25519
   - `ind:`: signature's index
   - `oind:`: optional, used for a rotated key, where `oind` is "old" index of the
-            key's position in the "k" files of the last establishment event
+            key's position in the "n" files of the last establishment event
   """
   @type t :: %__MODULE__{
           sig: {:atom, binary()},

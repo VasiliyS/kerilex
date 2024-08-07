@@ -7,7 +7,7 @@ defmodule Watcher.KeyState do
   import Comment
 
   comment("""
-   example of a key state notice response form keripy:
+   example of a key state notice response from keripy:
 
   {
     "v": "KERI10JSON0002fa_",
@@ -46,22 +46,76 @@ defmodule Watcher.KeyState do
 
   """)
 
+  defstruct ~w|p s d fs k kt n nt b bt c di|a
+
   @est_events Event.est_events()
 
-  def new(%{"t" => type} = est_event) when type in @est_events do
-    to_state(type, est_event)
+  def new(), do: %__MODULE__{}
+
+  def new(%{"t" => type} = est_event, attachments, prev_state) when type in @est_events do
+    to_state(type, est_event, attachments, prev_state)
   end
 
-  def new(event) do
-    {:error, "wrong event type, expected one of: #{inspect(@est_events)}, got: '#{event["t"]}'"}
+  # non establishment events don't change key state
+  def new(_event, _attachments, prev_state) do
+    {:ok, prev_state}
   end
 
-  @icp_filter_labels  ~w|v i d|
-  defp to_state("icp", icp_event) do
-    {:ok, icp_event}
+  defp to_state("icp", icp_event, _attachments, _prev_state) do
+    {:ok,
+     %__MODULE__{
+       p: icp_event["p"],
+       s: icp_event["s"],
+       d: icp_event["d"],
+      #  dt: icp_event["dt"],
+       fs: DateTime.utc_now() |> DateTime.to_iso8601(),
+       k: icp_event["k"],
+       kt: icp_event["kt"],
+       n: icp_event["n"],
+       nt: icp_event["nt"],
+       b: icp_event["b"],
+       bt: icp_event["bt"],
+       c: icp_event["c"]
+     }}
   end
 
-  defp to_state(type, _ee) do
+  alias Watcher.KeyState.RotEvent
+
+  defp to_state("rot", rot_event, attachments, %__MODULE__{} = prev_state) do
+
+    comment("""
+    `rot` can do the following:
+     1. use keys from the "n" list (either `icp` or updated through a prev `rot` )
+     2. add and delete witnesses
+     3. anchor a "seal", e.g. digest/said ("d") + sn ("s") + identifier ("i") of a `dip` or a tel event
+
+     1 and 2 will be validated and calculated here
+
+     3 will be handled by the storage (as part of the OOBI/KEL stream processing),
+     which will simply take `a` field and store it in the db.
+    """)
+
+    :ok = RotEvent.validate_new_keys(prev_state, rot_event, attachments)
+    {:ok, b } = RotEvent.new_backers(prev_state.b, rot_event["ba"], rot_event["br"], rot_event["bt"])
+
+
+    {:ok,
+     %__MODULE__{
+       p: rot_event["p"],
+       s: rot_event["s"],
+       d: rot_event["d"],
+      #  dt: rot_event["dt"],
+       fs: DateTime.utc_now() |> DateTime.to_iso8601(),
+       k: rot_event["k"],
+       kt: rot_event["kt"],
+       n: rot_event["n"],
+       nt: rot_event["nt"],
+       b: b,
+       bt: rot_event["bt"]
+     }}
+  end
+
+  defp to_state(type, _ee, _atts, _prev_state) do
     {:error, "establishment event type: '#{type}' is not implemented"}
   end
 end

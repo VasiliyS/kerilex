@@ -8,11 +8,11 @@ defmodule Kerilex.Event do
   alias Jason.OrderedObject, as: OO
 
   @said_ph Kerilex.said_placeholder(44)
-  @saidify_labels %{"icp" => [:d, :i], "dip" => [:d, :i]}
+  @saidify_labels %{"icp" => [:d, :i], "dip" => [:d, :i], "vcp" => [:d, :i]}
   @keri_ver "KERI10"
 
   # inception labels
-  @icp_labels ["v", "i", "s", "t", "kt", "k", "nt" ,"n", "bt", "b", "c", "a"]
+  @icp_labels ["v", "d", "i", "s", "t", "kt", "k", "nt" ,"n", "bt", "b", "c", "a"]
 
   # delegated inception labels
   @dip_labels ["v", "i", "s", "t", "kt", "k", "nt", "n", "bt", "b", "c", "a", "di"]
@@ -49,6 +49,8 @@ defmodule Kerilex.Event do
   # reply event labels
   @rpy_labels ["v", "t", "d", "dt", "r", "a"]
 
+  @vcp_labels ~w[v t d i ii s c bt b n]
+
   @known_event_types %{
     "icp" => @icp_labels,
     "dip" => @dip_labels,
@@ -56,7 +58,8 @@ defmodule Kerilex.Event do
     "drt" => @drt_labels,
     "ixn" => @ixn_labels,
     "ksn" => @ksn_labels,
-    "rpy" => @rpy_labels
+    "rpy" => @rpy_labels,
+    "vcp" => @vcp_labels
   }
 
   const(keri_version_str, @keri_ver <> "JSON000000_")
@@ -67,6 +70,7 @@ defmodule Kerilex.Event do
   const(ixn_labels, @ixn_labels)
   const(ksn_labels, @ksn_labels)
   const(rpy_labels, @rpy_labels)
+  const(vcp_labels, @vcp_labels)
 
   @est_events ~w[icp dip rot drt]
   const(est_events, @est_events)
@@ -263,4 +267,6 @@ defmodule Kerilex.Event do
   def int_to_hex(number) do
     number |> Integer.to_string(16) |> String.downcase()
   end
+
+
 end

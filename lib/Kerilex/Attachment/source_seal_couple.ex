@@ -2,10 +2,18 @@ defmodule Kerilex.Attachment.SealSourceCouple do
   @moduledoc """
     Deals with seal source couples: \n
       ex: 0AAAAAAAAAAAAAAAAAAAAAABECphNWm1_jZOupeKh6C7TlBi81BlERqbnMpyqpnS4CJY\n
-      sequence number  + prefix
+      sequence number  + dig
   """
 
+  defstruct seq: nil, dig: nil
+
   alias Kerilex.Attachment.Number
+
+  @code "0A"
+
+  def new(seq, dig) do
+    %__MODULE__{seq: seq, dig: dig}
+  end
 
   def parse(<<att::bitstring>>) do
     with {:ok, sn, att_rest} <- parse_fn(att),
@@ -29,5 +37,16 @@ defmodule Kerilex.Attachment.SealSourceCouple do
 
   defp parse_pref(<<pref::binary-size(44), att_rest::bitstring>>) do
     {:ok, pref, att_rest}
+  end
+
+  #############################  encoding ###############################
+
+  def encode(%__MODULE__{seq: seq, dig: dig}) do
+    b64_seq = Number.int_to_b64!(seq, 22)
+    {:ok, ["0A", b64_seq, dig]}
+  end
+
+  def encode(_something) do
+    {:error, "bad argument, expected %SealSourceCouple"}
   end
 end

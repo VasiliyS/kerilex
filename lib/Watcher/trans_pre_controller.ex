@@ -6,9 +6,16 @@ defmodule Watcher.TransPreController do
   alias Kerilex.Attachment.IndexedControllerSigs, as: ICSigs
   alias Kerilex.Attachment, as: Att
 
-  def new(salt) do
-    {:ok, [signer]} = Crypto.salt_to_signers(salt, 1)
-    next_key_opts = %{ridx: 1, kidx: 1}
+  def new(salt, stem \\ "") do
+    opts =
+      if stem != "" do
+        %{stem: stem}
+      else
+        %{stem: "__signatory__"}
+      end
+
+    {:ok, [signer]} = Crypto.salt_to_signers(salt, 1, opts)
+    next_key_opts = Map.merge(opts, %{ridx: 1, kidx: 1})
     {:ok, [nsigner]} = Crypto.salt_to_signers(salt, 1, next_key_opts)
     # {:ok, ctrl} = incept(%__MODULE__{signer: signer, nsigner: nsigner})
     # {:ok, att} = sign_icp(ctrl)
@@ -28,6 +35,14 @@ defmodule Watcher.TransPreController do
 
     {:ok, att} = sign_icp(ctrl, serd_event)
     {:ok, %__MODULE__{ctrl | pre: pre, inception: %{serd_event: serd_event, att: att}}}
+  end
+
+  def icp_data(%__MODULE__{} = ctrl) do
+    {ctrl.inception.serd_event, ctrl.inception.att}
+  end
+
+  def pre_and_signer(%__MODULE__{} = ctrl) do
+    {ctrl.pre, ctrl.signer}
   end
 
   defp sign_icp(%{signer: signer}, icp_msg) do

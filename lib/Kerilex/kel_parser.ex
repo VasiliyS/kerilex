@@ -69,7 +69,7 @@ defmodule Kerilex.KELParser do
 
   Returns `{error: reason}` or `{:ok, parsed_msg}`. `parsed_msg` is `%Jason.OrderedObject`
   """
-  def check_msg_integrity(%{serd_msg: serd_msg} = keri_msg) do
+  def check_msg_integrity(%{serd_msg: serd_msg} = _keri_msg) do
     with {:ok, parsed_msg} <-
            serd_msg
            |> Jason.decode(objects: :ordered_objects),
@@ -183,7 +183,7 @@ defmodule Kerilex.KELParser do
 
   @doc """
    Verifies signatures on parsed messages that have required keys, backers, etc
-   this includes `rpy` and establishment messages (e.g. `icp`, `dip`, `rot` and `drt`)
+   this includes `rpy` and establishment messages (e.g. `icp`, `dip`)
 
 
    Returns `:ok` or `{:error, reason}`
@@ -222,7 +222,7 @@ defmodule Kerilex.KELParser do
     check_idx_sigs(parsed_msg, serd_msg, wit_sigs, "b")
     |> case do
       {:error, reason} ->
-        {:error, "witness signature check failed:" <> reason}
+        {:error, "witness signature check failed: " <> reason}
 
       res ->
         res

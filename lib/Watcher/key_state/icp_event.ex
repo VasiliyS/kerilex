@@ -40,7 +40,7 @@ defmodule Watcher.KeyState.IcpEvent do
         {:error, "icp event must have sn=0, got: #{icp["s"]}"}
 
       icp["d"] != icp["i"] ->
-        {:error, "said and prefix mismatch, 'd'='#{icp["d"]}' and 'i'='#{icp["i"]}'"}
+        {:error, "said and prefix mismatch, 'd'='#{icp["d"]}' and 'i'='#{icp["i"]}' , icp = '#{inspect(icp)}'"}
 
 
       true ->

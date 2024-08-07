@@ -86,7 +86,7 @@ defmodule Kerilex do
     lst =
       Enum.reduce(
         1..length,
-        '',
+        ~c"",
         fn _, acc ->
           [char | acc]
         end

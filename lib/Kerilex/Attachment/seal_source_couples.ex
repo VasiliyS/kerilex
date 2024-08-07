@@ -35,4 +35,12 @@ defmodule Kerilex.Attachment.SealSourceCouples do
         error
     end
   end
+
+  ###################  encoding #####################
+  alias Kerilex.Attachment.ListEncoder, as: LE
+
+  def encode(source_seal_couples, opts \\ [to: :iodata])
+      when is_list(source_seal_couples) do
+    LE.encode(@code, Kerilex.Attachment.SealSourceCouple, source_seal_couples, opts)
+  end
 end

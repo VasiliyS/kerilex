@@ -1,4 +1,4 @@
-defmodule Watcher.SefBackedController do
+defmodule Watcher.SelfBackedController do
   defstruct pre: nil, signer: nil, nsigner: nil, backers: [], inception: nil
 
   alias Kerilex.Event.Inception, as: Icp

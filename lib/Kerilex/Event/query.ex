@@ -75,7 +75,7 @@ defmodule Kerilex.Event.Query do
       "r": "mbx",
       "rr": "",
       "q": {
-        "pre": "ECiTx4B-xr0XDsxGB2iQwPT7GrhPz7t7bnIZO-SbdOxg",
+        "pre": "ECiTx4B-xr0XDsxGB2iQwPT7GrhPz7t7bnIZO-SbdOxg", <- this is actually not used.
         "topics": {
           "/receipt": 0,
           "/replay": 0,
@@ -100,7 +100,7 @@ defmodule Kerilex.Event.Query do
     to_ordered_object("ksn", "", query_obj)
   end
 
-  def logs(asking_pre, subj_pre, wit_pre, rr \\ "", s \\ nil, event_seal \\ [])
+  def logs(subj_pre, wit_pre, rr \\ "", s \\ nil, event_seal \\ [])
       when is_list(event_seal) do
     sn =
       if s != nil do
@@ -118,13 +118,28 @@ defmodule Kerilex.Event.Query do
       end
 
     query_obj =
-      ([pre: asking_pre, i: subj_pre] ++ sn ++ [src: wit_pre] ++ a)
+      ([i: subj_pre] ++ sn ++ [src: wit_pre] ++ a)
       |> Jason.OrderedObject.new()
 
     to_ordered_object("logs", rr, query_obj)
   end
 
-  def mbx(req_pre, subj_pre, wit_pre, %{} = topics, rr \\ "") do
+  def tels(wit_pre, reg_id, vc_id \\ "") do
+    query = [ri: reg_id, i: vc_id, src: wit_pre]
+    to_ordered_object("tels", "", query |> Jason.OrderedObject.new())
+  end
+
+  def tsn_of_registry(wit_pre, reg_id), do: tsn(wit_pre, reg_id)
+  def tsn_of_vc(wit_pre, vc_id), do: tsn(wit_pre, "", vc_id)
+
+  def tsn(wit_pre, reg_id, vc_id \\ "") do
+    query =
+      [ri: reg_id, i: vc_id, src: wit_pre]
+
+    to_ordered_object("tsn", "", query |> Jason.OrderedObject.new())
+  end
+
+  def mbx(subj_pre, wit_pre, %{} = topics, rr \\ "") do
     topics_obj =
       topics
       |> Enum.reduce(
@@ -138,7 +153,8 @@ defmodule Kerilex.Event.Query do
 
     query_obj =
       [
-        pre: req_pre,
+        # Kevery.processQeury doesn't use `pre`, instead the siginer ( as part of the CESR header will be used as the source->destination)
+        # pre: req_pre,
         topics: topics_obj,
         i: subj_pre,
         src: wit_pre
@@ -175,24 +191,27 @@ defmodule Kerilex.Event.Query do
   alias Kerilex.Attachment, as: Att
   alias Att.TransLastIdxSigGroups, as: TLISG
 
-  def sign(pre, signers, qry_msg) when is_list(signers) do
+  def sign_and_encode_to_cesr(pre, signers, qry_msg) when is_list(signers) do
+    tr_last_idx_sigs_group = sign_group_cesr(pre, signers, qry_msg)
+
+    Att.encode(tr_last_idx_sigs_group)
+  end
+
+  def sign_group_cesr(pre, signers, qry_msg) when is_list(signers) do
     ctrl_sigs =
       for {s, ind} <- Enum.with_index(signers), into: [] do
         {:ok, sig} = Signer.sign(s, qry_msg)
         %Att.IndexedControllerSig{sig: sig, ind: ind}
       end
 
-    # {:ok, idx_ctrl_sigs} = Att.IndexedControllerSigs.encode(ctrl_sigs)
-
     {:ok, tr_last_idx_sigs_group} = [{pre, ctrl_sigs}] |> TLISG.encode()
-
-    Att.encode(tr_last_idx_sigs_group |> IO.inspect(label: "enc_groups"))
+    tr_last_idx_sigs_group
   end
 
   def sign(signer, qry_msg) do
     {:ok, sig} = Signer.sign(signer, qry_msg)
-    #ctrl_sig = %Att.IndexedControllerSig{sig: sig, ind: 0}
-    #{:ok, idx_ctrl_sigs} = Att.IndexedControllerSigs.encode([ctrl_sig])
+    # ctrl_sig = %Att.IndexedControllerSig{sig: sig, ind: 0}
+    # {:ok, idx_ctrl_sigs} = Att.IndexedControllerSigs.encode([ctrl_sig])
     receipt_couple = %Att.NonTransReceiptCouple{pre: signer.qb64, sig: sig}
     {:ok, enc_couples} = Att.NonTransReceiptCouples.encode([receipt_couple])
 

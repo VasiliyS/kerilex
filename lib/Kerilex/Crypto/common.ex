@@ -44,10 +44,11 @@ defmodule Kerilex.Crypto do
 
   @seed_tiers %{low: :interactive, med: :moderate, high: :sensitive}
 
-  @key_def_opts %{pidx: 0, kidx: 0, ridx: 0, tier: :low, nt: false, der_code: Ed.type()}
+  @key_def_opts %{stem: "__signatory__", pidx: 0, kidx: 0, ridx: 0, tier: :low, nt: false, der_code: Ed.type()}
   @doc """
              returns a list of Crypto.Signer structs
              opts:
+               stem: kli uses 'alias' to create a derivation path, e.g. 'external' will cause path to be 'external00'
                pidx: def 0, is int prefix index for key pair sequence
                ridx: def 0, is int rotation index for key pair set
                kidx: def 0, is int starting key index for key pair set
@@ -76,8 +77,9 @@ defmodule Kerilex.Crypto do
 
     signers =
       for i <- 0..(count - 1), into: [] do
-        # path "{}{:x}{:x}".format(stem, ridx, kidx + i), stem is pidx, hex
-        path = :io_lib.format("~.16b~.16b~.16b", [opts.pidx, opts.ridx, opts.kidx + i])
+        # path "{}{:x}{:x}".format(stem, ridx, kidx + i)
+        # stem is by default "__signatory__"
+        path = :io_lib.format("#{opts.stem}~.16b~.16b", [ opts.ridx, opts.kidx + i])
 
         kp =
           salt_to_seed(raw_salt, path, opts.tier)

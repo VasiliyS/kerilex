@@ -32,6 +32,7 @@ defmodule Kerilex.Attachment do
     Kerilex.Attachment.SealSourceCouples => @seal_src_couples
   }
 
+  @spec parse(<<_::8, _::_*1>>) :: {any(), any()} | {:ok, map(), bitstring()}
   def parse(kel) do
     with {:ok, att, rest_kel} <- kel |> extract,
          {%{} = ap, <<>> = _rest_att} <- attachment_parts(att) do
@@ -101,6 +102,7 @@ defmodule Kerilex.Attachment do
 
   defp apply_parser(parser, {pam, rest_attach}) do
     if parser.code_match?(rest_attach) do
+      # IO.puts "using parser: #{parser}"
       {:ok, st, rest_attach} = parser.parse(rest_attach)
       pa = Map.put(pam, Map.fetch!(@parsers, parser), st)
       {pa, rest_attach, true}
@@ -111,7 +113,7 @@ defmodule Kerilex.Attachment do
 
   #############   encoding functions ###############
 
-  def encode(parts, opts \\ [to_iodata: false]) do
+  def encode(parts, opts \\ [iodata: false]) do
     IO.iodata_length(parts)
     |> to_size_quadlets()
     |> case do

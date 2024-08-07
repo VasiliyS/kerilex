@@ -28,6 +28,9 @@ defmodule Watcher.KeyStateEvent do
 
           :error ->
             {:halt, :error}
+
+          {:error, _reason} ->
+            {:halt, :error}
         end
 
       _kv, acc ->
@@ -77,7 +80,7 @@ defmodule Watcher.KeyStateEvent do
       endpoint.dt > o_endpoint.dt ->
         true
 
-      # different said, but new dt is older
+      # different said, but new dt is older or the same
       true ->
         false
     end

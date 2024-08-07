@@ -10,18 +10,37 @@ defmodule Kerilex.Crypto.Ed25519Sig do
   # defstruct sig: <<>>
   @sig_type Ed.type()
 
+  # TODO(VS): think about different contexts for these codes
+  # E.g. 'A' can be used for IndexedWitnessSig or in IndexedControllerSig, if ind == oind
+  # see in keripy: src/keri/core/indexing.py (line 55 -72)
+  # 'A' Ed25519 sig appears same in both lists if any.
   def code_match?(<<"A", _::bitstring>>), do: true
+
+  # 0B is Ed448 signature appears in current list only, for indexed sigs or *simply ed25519* for NonTransCouples
   def code_match?(<<"0B", _::bitstring>>), do: true
+  # '2A'  Ed25519 sig appears in both lists.
   def code_match?(<<"2A", _::bitstring>>), do: true
+  # 'B'  Ed25519 sig appears in current list only.
+  def code_match?(<<"B", _::bitstring>>), do: true
   def code_match?(<<_::bitstring>>), do: false
+
+  def parse(
+        <<"B", ind::binary-size(1), b64_sig::binary-size(86), att_rest::bitstring>>,
+        sig_container
+      ) do
+      do_small_idx_parse(ind, b64_sig, att_rest, sig_container)
+  end
 
   def parse(
         <<"A", ind::binary-size(1), b64_sig::binary-size(86), att_rest::bitstring>>,
         sig_container
       ) do
+      do_small_idx_parse(ind, b64_sig, att_rest, sig_container)
+  end
+
+  defp do_small_idx_parse(ind, b64_sig, att_rest, sig_container) do
     with {:ok, idx} <- Number.b64_to_int(ind),
          sig <- b64_sig |> QB64.decode_qb64_value(1, 1, 88, 0) do
-      # sm = %__MODULE__{sig: sig}
       sm = {@sig_type, sig}
       {:ok, struct(sig_container, ind: idx, sig: sm), att_rest}
     end
@@ -41,7 +60,8 @@ defmodule Kerilex.Crypto.Ed25519Sig do
     end
   end
 
-  def parse(<<"0B", b64_sig::binary-size(86), att_rest::bitstring>>, _sig_container) do
+  # this one is used for NonTransReceiveCouple
+  def parse(<<"0B", b64_sig::binary-size(86), att_rest::bitstring>>, nil) do
     sig = b64_sig |> QB64.decode_qb64_value(1, 1, 88, 0)
     {:ok, {@sig_type, sig}, att_rest}
   end
