@@ -16,6 +16,31 @@ defmodule Watcher.KeyState.IcpEvent do
 
   alias Jason.OrderedObject, as: OO
   alias Watcher.KeyStateEvent, as: KSE
+  alias Kerilex.Crypto.KeyTally
+  alias Watcher.KeyState
+
+  def to_state(icp_event, sig_auth) do
+    case KeyTally.new(icp_event["nt"]) do
+      {:ok, next_kt} ->
+        {:ok,
+         %KeyState{
+           s: icp_event["s"],
+           d: icp_event["d"],
+           fs: DateTime.utc_now() |> DateTime.to_iso8601(),
+           k: icp_event["k"],
+           kt: sig_auth,
+           n: icp_event["n"],
+           nt: next_kt,
+           b: icp_event["b"],
+           bt: icp_event["bt"],
+           c: icp_event["c"],
+           di: false
+         }}
+
+      {:error, msg} ->
+        {:error, "failed to create KeyState object from 'icp' event, " <> msg}
+    end
+  end
 
   def from_ordered_object(%OO{} = msg_obj) do
     conversions = %{
@@ -40,12 +65,11 @@ defmodule Watcher.KeyState.IcpEvent do
         {:error, "icp event must have sn=0, got: #{icp["s"]}"}
 
       icp["d"] != icp["i"] ->
-        {:error, "said and prefix mismatch, 'd'='#{icp["d"]}' and 'i'='#{icp["i"]}' , icp = '#{inspect(icp)}'"}
-
+        {:error,
+         "said and prefix mismatch, 'd'='#{icp["d"]}' and 'i'='#{icp["i"]}' , icp = '#{inspect(icp)}'"}
 
       true ->
-        {:ok, icp}
-
+        KSE.validate_sig_ths_counts(icp)
     end
   end
 end

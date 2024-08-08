@@ -4,6 +4,29 @@ defmodule Watcher.KeyStateEvent do
   """
 
   alias Jason.OrderedObject, as: OO
+  alias Watcher.KeyState.Seal
+
+  @doc """
+  check that counts (lengths) of keys and thresholds are the same
+  should be used for the establishment events (e.g. `icp`, `rot`, `dip`, `drt`)
+  """
+  def validate_sig_ths_counts(est_event) do
+    kl = length(est_event["k"])
+    ktl = length(est_event["kt"])
+    nl = length(est_event["n"])
+    ntl = length(est_event["nt"])
+
+    cond do
+    kl != ktl ->
+      {:error,
+       "establishment event has mismatching signing authority configuration, count of 'k'(#{kl}) != count of 'kt'(#{ktl})"}
+    nl != ntl ->
+      {:error,
+       "establishment event has mismatching next key configuration, count of 'n'(#{nl}) != count of 'nt'(#{ntl})"}
+    true ->
+      {:ok, est_event}
+    end
+  end
 
   @doc """
   takes the value of the "v" field and returns just the KERI version string. e.g. "KERI10".
@@ -65,6 +88,26 @@ defmodule Watcher.KeyStateEvent do
 
   def to_number(value) when is_integer(value), do: {:ok, value}
 
+
+  @doc """
+  helper for converting content of the `a` event field,
+  converts a list of `Jason.OrderedObject`s, assuming that they are _seals_, to a list of maps
+  """
+  def anchor_handler(anchors) when is_list(anchors) do
+    Enum.reduce_while(
+      anchors,
+      [],
+      fn anchor, acc ->
+        case to_storage_format(anchor, Seal, %{"s" => &to_number/1}) do
+          :error ->
+            {:halt, :error}
+
+          seal ->
+            {:cont, {:ok, [seal | acc]}}
+        end
+      end
+    )
+  end
   @doc """
   compares `KEL` data structures using `BADA` (Best Available Data Acceptance) policy
   """

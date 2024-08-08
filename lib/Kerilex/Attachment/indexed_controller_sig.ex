@@ -10,13 +10,13 @@ defmodule Kerilex.Attachment.IndexedControllerSig do
   Container for thr signatures for the indexed signatures
   - `sig:`: is a tuple {type,sig}, type is e.g. :ed25519
   - `ind:`: signature's index
-  - `oind:`: optional, used for a rotated key, where `oind` is "old" index of the
-            key's position in the "n" files of the last establishment event
+  - `oind:`: used for a rotated key, where `oind` is "old" index of the
+            key's position in the "n" field of the last establishment event
   """
   @type t :: %__MODULE__{
           sig: {:atom, binary()},
           ind: non_neg_integer ,
-          oind: non_neg_integer | nil
+          oind: non_neg_integer
         }
 
   alias Kerilex.Attachment.Signature

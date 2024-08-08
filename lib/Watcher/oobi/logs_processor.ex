@@ -4,6 +4,7 @@ defmodule Watcher.OOBI.LogsProcessor do
 
   Updates persistent KEL
   """
+  alias Kerilex.Crypto.KeyTally
   alias Watcher.KeyState
   alias Watcher.EventEscrow
   require Logger
@@ -50,7 +51,7 @@ defmodule Watcher.OOBI.LogsProcessor do
   end
 
   defp process_escrow(escrow, _said, state) do
-    #TODO(VS): implement escrow handling logic
+    # TODO(VS): implement escrow handling logic
     {:ok, escrow, state}
   end
 
@@ -68,8 +69,7 @@ defmodule Watcher.OOBI.LogsProcessor do
   def process_kel_msg(%{} = parsed_msg_map, escrow, state) do
     with {:ok, msg_obj} <- KELParser.check_msg_integrity(parsed_msg_map),
          :ok <- msg_obj |> Event.check_labels(),
-         {:ok, said, res} <- maybe_update_kel(msg_obj["t"], msg_obj, parsed_msg_map),
-         {:ok, state} <- msg_obj |> KeyState.new(state) do
+         {:ok, said, state, res} <- maybe_update_kel(msg_obj["t"], msg_obj, parsed_msg_map, state) do
       Logger.debug(Map.put(res, :msg, "added event"))
 
       escrow |> process_escrow(said, state)
@@ -79,8 +79,7 @@ defmodule Watcher.OOBI.LogsProcessor do
   alias Watcher.KeyState.Endpoint
   alias Watcher.KeyStateStore
 
-
-  defp maybe_update_kel("rpy", msg_obj, parsed_msg) do
+  defp maybe_update_kel("rpy", msg_obj, parsed_msg, _prev_state) do
     with true <- msg_obj["r"] == "/loc/scheme",
          :ok <- KELParser.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
          {:ok, endpoint} <- Endpoint.new(msg_obj) do
@@ -96,22 +95,31 @@ defmodule Watcher.OOBI.LogsProcessor do
     end
   end
 
-  alias Watcher.KeyState.IcpEvent
+  alias Watcher.KeyState
+  alias Watcher.KeyState.{IcpEvent, RotEvent}
 
-  defp maybe_update_kel("icp", msg_obj, parsed_msg) do
-    with :ok <- KELParser.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
+  defp maybe_update_kel("icp", msg_obj, parsed_msg, _prev_state) do
+    with {:ok, sig_th} <- KELParser.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
          {:ok, icp_event} <- IcpEvent.from_ordered_object(msg_obj),
-         storage_id <- {icp_event["i"], 0} do
-      KeyStateStore.maybe_update_kel(storage_id, icp_event)
-      |> handle_update_kel_res(icp_event)
-
-      # keystate will be handled at the end of the loop for all log messages in the OOBI response
-      # KeyStateStore.maybe_update_ks(pre, sn, icp_event)
-      # |> handle_update_ks_res(icp_event)
+         {:ok, key_state} <- KeyState.new(icp_event, sig_th, parsed_msg, KeyState.new()) do
+      {icp_event["i"], 0}
+      |> KeyStateStore.maybe_update_kel(icp_event)
+      |> handle_update_kel_res(icp_event, key_state)
     end
   end
 
-  defp maybe_update_kel(type, msg_obj, _parsed_msg) do
+  defp maybe_update_kel("rot", msg_obj, parsed_msg, prev_state) do
+    with {:ok, rot_event} <- RotEvent.from_ordered_object(msg_obj),
+        {:ok, sig_th} <- KeyTally.new(rot_event["kt"]),
+         {:ok, key_state} <- KeyState.new(rot_event, sig_th, parsed_msg, prev_state),
+         :ok <- KELParser.check_sigs_on_rot_msg(msg_obj, key_state.b, parsed_msg) do
+      {rot_event["i"], rot_event["s"]}
+      |> KeyStateStore.maybe_update_kel(rot_event)
+      |> handle_update_kel_res(rot_event, key_state)
+    end
+  end
+
+  defp maybe_update_kel(type, msg_obj, _parsed_msg, _prev_state) do
     {:ok, msg_obj["d"], %{result: "ignored", reason: "unsupported message type: '#{type}'"}}
   end
 
@@ -128,15 +136,16 @@ defmodule Watcher.OOBI.LogsProcessor do
     end
   end
 
-  defp handle_update_kel_res(res, event_obj) do
+  defp handle_update_kel_res(res, event_obj, new_ks) do
     type = event_obj["t"]
 
     case res do
       {:ok, said} ->
-        {:ok, said, %{type: type, result: "updated KEL", pre: event_obj["i"], sn: event_obj["s"]}}
+        {:ok, said, new_ks,
+         %{type: type, result: "updated KEL", pre: event_obj["i"], sn: event_obj["s"]}}
 
       :not_updated ->
-        {:ok, "",
+        {:ok, "", new_ks,
          %{
            type: type,
            result: "ignored",
@@ -149,10 +158,10 @@ defmodule Watcher.OOBI.LogsProcessor do
         {:out_of_order, said, event_obj}
 
       {:duplicate, type_stored_event, said_stored_event} ->
-         {:error,
+        {:error,
          "duplicate event detected, already have event '#{type_stored_event}' at sn #{event_obj["s"]}, 'd' is '#{said_stored_event}'"}
 
-         error ->
+      error ->
         error
     end
   end

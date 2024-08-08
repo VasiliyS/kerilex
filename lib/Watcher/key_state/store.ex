@@ -128,7 +128,7 @@ defmodule Watcher.KeyStateStore do
       [] when sn == 0 ->
         update_ks(prefix, sn, event)
 
-      [] when sn > 0  ->
+      [] when sn > 0 ->
         :out_of_order
 
       [{_table, _pref, stored_sn, _state}] ->
@@ -175,7 +175,8 @@ defmodule Watcher.KeyStateStore do
         else
           # validate_config couldn't find icp event for the prefix
           :no_icp_event ->
-            {:out_of_order, pref} # missing said is the same as pref
+            # missing said is the same as pref
+            {:out_of_order, pref}
 
           # returned by check_parent
           :no_parent_event ->
@@ -205,7 +206,7 @@ defmodule Watcher.KeyStateStore do
       [] ->
         :no_parent_event
 
-      [_table, _key, stored_event] ->
+      [{_table, _key, stored_event}] ->
         if stored_event["d"] == event["p"] do
           :ok
         else
@@ -229,7 +230,7 @@ defmodule Watcher.KeyStateStore do
       [] ->
         :no_icp_event
 
-      [_table, _key, stored_event] ->
+      [{_table, _key, stored_event}] ->
         conf = Map.fetch!(stored_event, "c")
 
         if Event.is_event_allowed?(conf, event["t"]) do
@@ -254,7 +255,7 @@ defmodule Watcher.KeyStateStore do
     Mnesia.transaction(updater)
     |> case do
       {:atomic, :ok} ->
-        {:ok , event["d"]}
+        {:ok, event["d"]}
 
       {:aborted, reason} ->
         {:error, "failed to write new kel entry for pref '#{key |> elem(0)}', #{inspect(reason)}"}

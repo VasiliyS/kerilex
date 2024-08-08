@@ -83,27 +83,15 @@ defmodule Watcher.KeyState.RotEvent do
 
   alias Jason.OrderedObject, as: OO
   alias Watcher.KeyStateEvent, as: KSE
-  alias Watcher.KeyState.Seal
 
-  defp anchor_handler(anchors) do
-    Enum.reduce_while(anchors,
-    [],
-    fn anchor, acc ->
-      case KSE.to_storage_format(anchor, Seal, %{"s" => &KSE.to_number/1}) do
-        :error ->
-          {:halt, :error}
-        seal ->
-          {:cont, {:ok, [seal | acc]}}
-      end
-    end)
-  end
+  ################  conversion functionality, from parsed event (Jason.OrderedObject) to  simplified map ready for processing and storage
 
   def from_ordered_object(%OO{} = msg_obj) do
     conversions = %{
       "s" => &KSE.to_number/1,
       "bt" => &KSE.to_number/1,
       "v" => &KSE.keri_version/1,
-      "a" => &anchor_handler/1
+      "a" => &KSE.anchor_handler/1
     }
 
     KSE.to_storage_format(msg_obj, Watcher.KeyState.RotEvent, conversions)
@@ -122,14 +110,53 @@ defmodule Watcher.KeyState.RotEvent do
         {:error, "rot event must have sn > 0, got: #{rot["s"]}"}
 
       true ->
-        {:ok, rot}
+        KSE.validate_sig_ths_counts(rot)
+    end
+  end
 
+  #######################  validation and conversion functionality to transform rot event to a new, valid key state
+
+  def to_state(rot_event, sig_auth, attachments, %KeyState{} = prev_state) do
+    comment("""
+    `rot` can do the following:
+     1. use keys from the "n" list (either `icp` or updated through a prev `rot` )
+     2. add and delete witnesses
+     3. anchor a "seal", e.g. digest/said ("d") + sn ("s") + identifier ("i") of a `dip` or a tel event
+
+     1 and 2 will be validated and calculated here
+
+     3 will be handled by the storage (as part of the OOBI/KEL stream processing),
+     which will simply take `a` field and store it in the db.
+    """)
+
+    with {:ok, sig_auth} <- validate_new_keys(prev_state, rot_event, sig_auth, attachments),
+         {:ok, b} <-
+           new_backers(prev_state.b, rot_event["ba"], rot_event["br"], rot_event["bt"]),
+         {:ok, rot_auth} <- KeyTally.new(rot_event["nt"]) do
+      {:ok,
+       %KeyState{
+         prev_state
+         | p: rot_event["p"],
+           s: rot_event["s"],
+           d: rot_event["d"],
+           fs: DateTime.utc_now() |> DateTime.to_iso8601(),
+           k: rot_event["k"],
+           kt: sig_auth,
+           n: rot_event["n"],
+           nt: rot_auth,
+           b: b,
+           bt: rot_event["bt"]
+       }}
+    else
+      {:error, msg} ->
+        {:error, "failed to create KeyState object from 'rot' event, " <> msg}
     end
   end
 
   def validate_new_keys(
         %KeyState{} = prev_state,
         %{} = rot_event,
+        sig_auth,
         attachments
       )
       when is_map_key(attachments, @sigs_key) do
@@ -146,90 +173,142 @@ defmodule Watcher.KeyState.RotEvent do
 
     %{@sigs_key => idx_crtl_sigs} = attachments
     sig_keys = rot_event["k"]
+    # {:ok, sig_auth} = KeyTally.new(rot_event["kt"])
 
     # {[cur_idx], [prior_next_idx]}, where prio_next_idx is nil for a new key
     # validate that sig_keys are either from the set of the prio next keys or new
-    {:ok, {cur_idxs, prior_next_idxs}} = sig_idx_pairs(sig_keys, idx_crtl_sigs, prev_state.n)
+    {:ok, {cur_idxs, prior_next_idxs}} = sig_idx_pairs(idx_crtl_sigs, sig_keys, prev_state.n)
 
     :ok = check_auth_ths(prior_next_idxs, prev_state.nt, "rotation autjority check failed: ")
-    :ok = check_auth_ths(cur_idxs, rot_event["kt"], "signing authority check failed: ")
-    :ok
+    :ok = check_auth_ths(cur_idxs, sig_auth, "signing authority check failed: ")
+    {:ok, sig_auth}
   end
 
-  def check_auth_ths(sig_idxs, ths, err_msg) do
-    with {:ok, auth} <- KeyTally.new(ths),
-         true <- KeyTally.satisfy?(auth, sig_idxs) do
+  def check_auth_ths(sig_idxs, auth, err_msg) do
+    if KeyTally.satisfy?(auth, sig_idxs) do
       :ok
     else
-      {:error, msg } ->
-        {:error, err_msg <> msg}
-      false ->
-        {:error, err_msg <> "signature indexes '#{inspect(sig_idxs)}, thresholds '#{ths}'"}
+      # TODO(VS) add KeyTally to kt/nt string diagnostics
+      {:error, err_msg <> "signature indexes '#{inspect(sig_idxs)}"}
     end
   end
 
+  def sig_idx_pairs(idx_ctrl_sigs, sig_keys, prio_next_keys) do
+    do_idx_pairs =
+      fn %IndexedControllerSig{ind: ind, oind: oind}, {cidxs, pidxs} ->
+        case do_check_key_rules(ind, oind, sig_keys, prio_next_keys) do
+          {:error, _} = err ->
+            {:halt, err}
 
-  def sig_idx_pairs(sig_keys, idx_ctrl_sigs, prio_next_keys)
-      when length(sig_keys) == length(idx_ctrl_sigs) do # this is wrong!, sigs are primary not the keys
-    sig_keys
-    |> Enum.with_index()
-    |> Enum.reduce_while(
-      [],
-      fn {skey, sk_idx}, acc ->
-        prio_next_key = Kerilex.Crypto.hash_and_encode!(skey)
-        found_at = Enum.find_index(prio_next_keys, &Kernel.==(&1, prio_next_key))
+          :new_key_added ->
+            {:cont, {[ind | cidxs], pidxs}}
 
-        find_in_sigs(sk_idx, found_at, idx_ctrl_sigs)
-        |> case do
-          {:error, _} = res ->
-            {:halt, res}
-
-          oind ->
-            {:cont, [{sk_idx, oind} | acc]}
+          :ok ->
+            {:cont, {[ind | cidxs], [oind | pidxs]}}
         end
       end
+
+    idx_ctrl_sigs
+    |> Enum.reduce_while(
+      {_curr_idxs = [], _prior_next_idxs = []},
+      do_idx_pairs
     )
     |> case do
-      {:error, _} = res ->
-        res
-
-      res ->
-        # reverse and trasform for consuption by KeyTally
-        {:ok,
-         Enum.reduce(res, {[], []}, fn {cur_idx, prio_next_idx}, {cur_idxs, pn_idxs} ->
-           {[cur_idx | cur_idxs], [prio_next_idx | pn_idxs]}
-         end)}
+      {:error, _} = err -> err
+      res -> {:ok, res}
     end
   end
 
-  def sig_idx_pairs(sig_keys, idx_ctrl_sigs, _pnk) do
-    {:error,
-     "length of the signing 'k' list (#{length(sig_keys)}) differs from the number of attached sigs (#{length(idx_ctrl_sigs)})"}
+  defp do_check_key_rules(ind, nil, sig_keys, _prior_next_keys) do
+    # this is a bit excessive, but just to be on the safe side.
+    if Enum.at(sig_keys, ind) != nil do
+      :new_key_added
+    else
+      {:error, "out of bound signing key index(#{ind})"}
+    end
   end
 
-  defp find_in_sigs(_sk_idx, nil, _idx_ctrl_sigs) do
-    # this key is completely new!
-    nil
+  defp do_check_key_rules(ind, oind, sig_keys, prior_next_keys) do
+    with key <- Enum.at(sig_keys, ind),
+         :key_found <-
+           (key != nil && :key_found) || {:error, "out of bound signing key index(#{ind})"},
+         pnk_at_oidx = Enum.at(prior_next_keys, oind),
+         :key_found <-
+           (pnk_at_oidx != nil && :key_found) ||
+             {:error, "out of bound prior next key index(#{oind})"},
+         pnk = Kerilex.Crypto.hash_and_encode!(key),
+         :match <-
+           (pnk == pnk_at_oidx && :match) ||
+             {:error,
+              "current signing key(#{key}) at ind(#{ind} does not match next prior key(#{pnk_at_oidx}) at oind(#{oind})"} do
+      :ok
+    else
+      {:error, _} = err -> err
+    end
   end
 
-  defp find_in_sigs(sk_idx, found_at, idx_ctrl_sigs) do
-    Enum.find_value(idx_ctrl_sigs, fn %IndexedControllerSig{ind: ind, oind: oind} ->
-      cond do
-        ind != sk_idx ->
-          nil
+  # def sig_idx_pairs(sig_keys, idx_ctrl_sigs, prio_next_keys)
+  #     # this is wrong!, sigs are primary not the keys
+  #     when length(sig_keys) == length(idx_ctrl_sigs) do
+  #   sig_keys
+  #   |> Enum.with_index()
+  #   |> Enum.reduce_while(
+  #     [],
+  #     fn {skey, sk_idx}, acc ->
+  #       prio_next_key = Kerilex.Crypto.hash_and_encode!(skey)
+  #       found_at = Enum.find_index(prio_next_keys, &Kernel.==(&1, prio_next_key))
 
-        ind == sk_idx and (oind == found_at or oind == nil) ->
-          # sigs whose key has the same index in both lists don't produce oind
-          oind || found_at
+  #       find_in_sigs(sk_idx, found_at, idx_ctrl_sigs)
+  #       |> case do
+  #         {:error, _} = res ->
+  #           {:halt, res}
 
-        ind == sk_idx and oind != found_at ->
-          {:error,
-           "mismatch: prio next key found at ind(#{found_at}), indexed controller signature oind(#{oind || "nil"})"}
-      end
-    end)
-  end
+  #         oind ->
+  #           {:cont, [{sk_idx, oind} | acc]}
+  #       end
+  #     end
+  #   )
+  #   |> case do
+  #     {:error, _} = res ->
+  #       res
 
-  def new_backers(prev_backers, rot_ba, rot_br, rot_bt ) do
+  #     res ->
+  #       # reverse and trasform for consuption by KeyTally
+  #       {:ok,
+  #        Enum.reduce(res, {[], []}, fn {cur_idx, prio_next_idx}, {cur_idxs, pn_idxs} ->
+  #          {[cur_idx | cur_idxs], [prio_next_idx | pn_idxs]}
+  #        end)}
+  #   end
+  # end
+
+  # def sig_idx_pairs(sig_keys, idx_ctrl_sigs, _pnk) do
+  #   {:error,
+  #    "length of the signing 'k' list (#{length(sig_keys)}) differs from the number of attached sigs (#{length(idx_ctrl_sigs)})"}
+  # end
+
+  # defp find_in_sigs(_sk_idx, nil, _idx_ctrl_sigs) do
+  #   # this key is completely new!
+  #   nil
+  # end
+
+  # defp find_in_sigs(sk_idx, found_at, idx_ctrl_sigs) do
+  #   Enum.find_value(idx_ctrl_sigs, fn %IndexedControllerSig{ind: ind, oind: oind} ->
+  #     cond do
+  #       ind != sk_idx ->
+  #         nil
+
+  #       ind == sk_idx and (oind == found_at or oind == nil) ->
+  #         # sigs whose key has the same index in both lists don't produce oind
+  #         oind || found_at
+
+  #       ind == sk_idx and oind != found_at ->
+  #         {:error,
+  #          "mismatch: prio next key found at ind(#{found_at}), indexed controller signature oind(#{oind || "nil"})"}
+  #     end
+  #   end)
+  # end
+
+  def new_backers(prev_backers, rot_ba, rot_br, rot_bt) do
     comment("""
       see:
       - https://trustoverip.github.io/tswg-keri-specification/#backer-remove-list

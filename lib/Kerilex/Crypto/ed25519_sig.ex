@@ -2,6 +2,7 @@ defmodule Kerilex.Crypto.Ed25519Sig do
   @moduledoc """
     Signature Type and QB64 encoding, decoding
   """
+  alias Kerilex.Attachment.IndexedControllerSig
   alias Kerilex.Derivation.Basic, as: QB64
   alias Kerilex.Attachment.Number
   alias Kerilex.Crypto.Ed25519, as: Ed
@@ -28,14 +29,28 @@ defmodule Kerilex.Crypto.Ed25519Sig do
         <<"B", ind::binary-size(1), b64_sig::binary-size(86), att_rest::bitstring>>,
         sig_container
       ) do
-      do_small_idx_parse(ind, b64_sig, att_rest, sig_container)
+    do_small_idx_parse(ind, b64_sig, att_rest, sig_container)
   end
 
   def parse(
         <<"A", ind::binary-size(1), b64_sig::binary-size(86), att_rest::bitstring>>,
         sig_container
       ) do
-      do_small_idx_parse(ind, b64_sig, att_rest, sig_container)
+    with {:ok, idx} <- Number.b64_to_int(ind),
+         sig <- b64_sig |> QB64.decode_qb64_value(1, 1, 88, 0) do
+      sm = {@sig_type, sig}
+
+      # TODO(VS): need to think if there's a better type handling for the
+      # cases where signature code is context dependent
+      res =
+        if sig_container == IndexedControllerSig do
+          struct(sig_container, ind: idx, oind: idx, sig: sm)
+        else
+          struct(sig_container, ind: idx, sig: sm)
+        end
+
+      {:ok, res , att_rest}
+    end
   end
 
   defp do_small_idx_parse(ind, b64_sig, att_rest, sig_container) do

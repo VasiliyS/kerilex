@@ -65,6 +65,25 @@ defmodule Kerilex.Crypto.KeyTally do
      "bad argument, got '#{data}', expected an integer, hex encoded integer string or a list of fractions"}
   end
 
+  def to_json(%KT{threshold: t}) do
+    Integer.to_string(t, 16)
+  end
+
+  def to_json(%WKT{weights: w}) do
+    Enum.reduce(w, [], fn r, acc ->
+      [
+        if(r.numerator == 0,
+          do: "0",
+          else:
+            [Integer.to_string(r.numerator), ~c"/", Integer.to_string(r.denominator)]
+            |> IO.iodata_to_binary()
+        )
+        | acc
+      ]
+    end)
+    |> Enum.reverse()
+  end
+
   defp process_tr_clauses(tr_clauses, pattern) do
     tr_clauses
     |> Enum.reduce_while(

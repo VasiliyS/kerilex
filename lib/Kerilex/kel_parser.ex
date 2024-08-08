@@ -196,6 +196,52 @@ defmodule Kerilex.KELParser do
     end
   end
 
+  @doc """
+   Verifies signatures or `rot` and `drt` that depend on state calculations
+
+   Returns `:ok` or `{:error, reason}`
+  """
+  def check_sigs_on_rot_msg(msg_obj, backers, %{serd_msg: serd_msg} = keri_msg) do
+    with {:ok, wit_sigs} <-
+           keri_msg
+           |> Map.fetch(Att.idx_wit_sigs())
+           |> wrap_error("missing witness signatures"),
+         {:ok, b_indices} <-  check_backer_sigs(serd_msg, wit_sigs, backers),
+         :ok <- msg_obj |> check_backer_threshold(b_indices),
+         {:ok, ctrl_sigs} <-
+           keri_msg
+           |> Map.fetch(Att.idx_ctrl_sigs())
+           |> wrap_error("missing controller signatures"),
+         {:ok, _c_indices} <- msg_obj |> check_ctrl_sigs(serd_msg, ctrl_sigs) do
+      :ok
+    end
+  end
+
+  # this one is used for `rot` and `drt` messages
+  defp check_backer_sigs(serd_msg, wit_sigs, backers) when is_bitstring(serd_msg) do
+    backers
+    |> validate_idx_sigs(wit_sigs, serd_msg)
+    |> case do
+      {:error, reason} ->
+        {:error, "witness signature check failed: " <> reason}
+
+      res ->
+        res
+    end
+  end
+
+  # this one is used for `icp` and `dip` messages
+  defp check_backer_sigs(parsed_msg, serd_msg, wit_sigs) when is_bitstring(serd_msg) do
+    check_idx_sigs(parsed_msg, serd_msg, wit_sigs, "b")
+    |> case do
+      {:error, reason} ->
+        {:error, "witness signature check failed: " <> reason}
+
+      res ->
+        res
+    end
+  end
+
   defp check_witness_rcpts(%{serd_msg: serd_msg} = keri_msg) do
     keri_msg
     |> Map.fetch!(Att.nt_rcpt_couples())
@@ -218,16 +264,6 @@ defmodule Kerilex.KELParser do
     end
   end
 
-  defp check_backer_sigs(parsed_msg, serd_msg, wit_sigs) do
-    check_idx_sigs(parsed_msg, serd_msg, wit_sigs, "b")
-    |> case do
-      {:error, reason} ->
-        {:error, "witness signature check failed: " <> reason}
-
-      res ->
-        res
-    end
-  end
 
   defp check_idx_sigs(parsed_msg, serd_msg, idx_sigs, key) do
     with {:ok, verkey_lst} <- parsed_msg |> get_list_of(key) do
@@ -305,7 +341,7 @@ defmodule Kerilex.KELParser do
            bt
            |> Integer.parse(16)
            |> wrap_error("can't parse 'bt' as hex int, got: #{inspect(bt)}") do
-      if(length(indices) < t) do
+      if length(indices) < t do
         {:error,
          "number of backers sigs (#{length(indices)}) is lower than the required threshold: #{t}"}
       else
@@ -323,7 +359,7 @@ defmodule Kerilex.KELParser do
            |> wrap_error("key threshold entry ('kt') is missing"),
          {:ok, t} <- KeyTally.new(kt) do
       if t |> KeyTally.satisfy?(indices) do
-        :ok
+        {:ok, t}
       else
         {:error, "key threshold: #{kt} wasn't satisfied by sig indices: #{inspect(indices)}"}
       end

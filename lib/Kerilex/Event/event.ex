@@ -11,20 +11,22 @@ defmodule Kerilex.Event do
   @saidify_labels %{"icp" => [:d, :i], "dip" => [:d, :i], "vcp" => [:d, :i]}
   @keri_ver "KERI10"
 
+  # ref see https://trustoverip.github.io/tswg-keri-specification/#key-event-messages
   # inception labels
-  @icp_labels ["v", "d", "i", "s", "t", "kt", "k", "nt" ,"n", "bt", "b", "c", "a"]
-
-  # delegated inception labels
-  @dip_labels ["v", "i", "s", "t", "kt", "k", "nt", "n", "bt", "b", "c", "a", "di"]
+  @icp_labels ~w[v t d i s kt k nt n bt b c a]
 
   # rotation labels
-  @rot_labels ["v", "i", "s", "t", "p", "kt", "k", "nt", "n", "bt", "br", "ba", "a"]
-
-  # delegated rotation labels
-  @drt_labels ["v", "i", "s", "t", "p", "kt", "k", "nt", "n", "bt", "br", "ba", "a"]
+  @rot_labels ~w[v t d i s p kt k nt n bt br ba a]
 
   # interaction event labels
-  @ixn_labels ["v", "i", "s", "t", "p", "a"]
+  @ixn_labels ~w[v t d i s p a]
+
+  # delegated inception labels
+  @dip_labels ~w[v t d i s kt k nt n bt b c a di]
+
+  # delegated rotation labels
+  @drt_labels ~w[v t d i s p kt k nt n bt br ba c a]
+
 
   # key state notice labels
   @ksn_labels [
