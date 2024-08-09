@@ -207,6 +207,7 @@ defmodule Kerilex.KELParser do
     end
   end
 
+
   @doc """
    Verifies signatures or `rot` and `drt` that depend on state calculations
 
@@ -229,7 +230,7 @@ defmodule Kerilex.KELParser do
   end
 
   # this one is used for `rot` and `drt` messages
-  defp check_backer_sigs(serd_msg, wit_sigs, backers) when is_bitstring(serd_msg) do
+  def check_backer_sigs(serd_msg, wit_sigs, backers) when is_bitstring(serd_msg) do
     backers
     |> validate_idx_sigs(wit_sigs, serd_msg)
     |> case do
@@ -242,7 +243,7 @@ defmodule Kerilex.KELParser do
   end
 
   # this one is used for `icp` and `dip` messages
-  defp check_backer_sigs(parsed_msg, serd_msg, wit_sigs) when is_bitstring(serd_msg) do
+  def check_backer_sigs(parsed_msg, serd_msg, wit_sigs) when is_bitstring(serd_msg) do
     check_idx_sigs(parsed_msg, serd_msg, wit_sigs, "b")
     |> case do
       {:error, reason} ->

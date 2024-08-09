@@ -41,7 +41,7 @@ defmodule Watcher.KeyStateStore do
     Mnesia.start()
     |> case do
       :ok ->
-        Mnesia.wait_for_tables([@ks_table, @backers_table, @kel_table, @anchors_table], 10_000)
+        Mnesia.wait_for_tables([@ks_table, @backers_table, @kel_table], 10_000)
         |> case do
           {:timeout, remaining_tables} ->
             {:error, "timeout loading db tables: #{inspect(remaining_tables)}"}
@@ -205,6 +205,7 @@ defmodule Watcher.KeyStateStore do
         if stored_event["d"] == event["d"] do
           :not_updated
         else
+          #TODO(VS): add recovery handling!
           {:duplicate, stored_event["t"], stored_event["d"]}
         end
 

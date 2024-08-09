@@ -98,4 +98,75 @@ defmodule Watcher.KeyState do
   defp to_state(type, _ee, _sig_auth, _atts, _prev_state) do
     {:error, "establishment event type: '#{type}' is not implemented"}
   end
+
+  ######################## threshold checking
+
+  def check_backer_threshold(%__MODULE__{} = ks, indices) do
+      if length(indices) < ks.bt do
+        {:error,
+         "number of backers sigs (#{length(indices)}) is lower than the required threshold: #{ks.bt}"}
+      else
+        :ok
+      end
+  end
+
+  def check_ctrl_sigs(%__MODULE__{} = ks, serd_msg, ctrl_sigs) do
+    check_idx_sigs(ks, serd_msg, ctrl_sigs, :k)
+    |> case do
+      {:error, reason} ->
+        {:error, "controller signature check failed:" <> reason}
+
+      res ->
+        res
+    end
+  end
+
+  defp check_idx_sigs(ks, serd_msg, idx_sigs, key) do
+    with {:ok, verkey_lst} <- Map.fetch(ks, key) do
+      verkey_lst |> validate_idx_sigs(idx_sigs, serd_msg)
+    end
+  end
+
+  defp validate_idx_sigs([], _idx_sigs, _data), do: {:error, "msg has an empty key list"}
+
+  defp validate_idx_sigs(key_lst, idx_sigs, data) do
+    nok = length(key_lst)
+
+    idx_sigs
+    |> Enum.reduce_while(
+      _acc = {:ok, []},
+      fn sig, {:ok, indices} ->
+        validate_idx_sig(nok, key_lst, sig, data)
+        |> case do
+          :ok ->
+            %{ind: sind} = sig
+            {:cont, {:ok, [sind | indices]}}
+
+          error ->
+            {:halt, error}
+        end
+      end
+    )
+  end
+
+  alias Kerilex.Attachment.Signature, as: Sig
+
+  defp validate_idx_sig(no_keys, key_lst, %{sig: sig, ind: sind}, data) do
+    if sind > no_keys do
+      {:error, "sig ind error: got: #{sind}, total keys: #{no_keys}"}
+    else
+      key_qb64 = key_lst |> Enum.at(sind)
+      Sig.check_with_qb64key(sig, data, key_qb64)
+    end
+  end
+
+
+  @compile {:inline, wrap_error: 2}
+  defp wrap_error(term, msg)
+
+  defp wrap_error(:error, msg) do
+    {:error, msg}
+  end
+
+  defp wrap_error(term, _), do: term
 end

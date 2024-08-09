@@ -4,10 +4,17 @@ defmodule Watcher.OOBI.LogsProcessor do
 
   Updates persistent KEL
   """
-  alias Watcher.KeyStateCache
   alias Kerilex.Crypto.KeyTally
-  alias Watcher.KeyState
+  alias Kerilex.KELParser
+  alias Kerilex.Event
+
   alias Watcher.EventEscrow
+  alias Watcher.KeyState.Endpoint
+  alias Watcher.KeyStateStore
+  alias Watcher.KeyState
+  alias Watcher.KeyState.{IcpEvent, RotEvent, DipEvent, IxnEvent}
+  alias Watcher.KeyStateCache
+
   require Logger
 
   @doc """
@@ -56,8 +63,6 @@ defmodule Watcher.OOBI.LogsProcessor do
     {:ok, escrow, state}
   end
 
-  alias Kerilex.KELParser
-  alias Kerilex.Event
 
   @doc """
   Takes one entry from `Kerilex.KELParser.parse/1` output, performs various integrity checks on it
@@ -78,28 +83,35 @@ defmodule Watcher.OOBI.LogsProcessor do
     end
   end
 
-  alias Watcher.KeyState.Endpoint
-  alias Watcher.KeyStateStore
+  defp maybe_update_kel("ixn", msg_obj, parsed_msg, state_cache) do
+    with {:ok, ixn_event} <- IxnEvent.from_ordered_object(msg_obj),
+         pref = ixn_event["i"],
+         curr_key_state <- state_cache |> KeyStateCache.get_key_state(pref),
+         :ok <- check_key_state_found(curr_key_state, pref, "ixn", ixn_event["d"]),
+         :ok <- IxnEvent.check_sigs(parsed_msg, curr_key_state) do
+      KeyStateStore.maybe_update_kel({pref, ixn_event["s"]}, ixn_event)
+      |> handle_update_kel_res(ixn_event, state_cache)
 
-  defp maybe_update_kel("rpy", msg_obj, parsed_msg, _prev_state) do
+    end
+  end
+
+  defp maybe_update_kel("rpy", msg_obj, parsed_msg, state_cache) do
     with true <- msg_obj["r"] == "/loc/scheme",
          :ok <- KELParser.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
          {:ok, endpoint} <- Endpoint.new(msg_obj) do
       {msg_obj["a"]["eid"], msg_obj["a"]["scheme"]}
       |> KeyStateStore.maybe_update_backers(endpoint)
-      |> handle_update_backers_res(msg_obj)
+      |> handle_update_backers_res(msg_obj, state_cache)
     else
       false ->
-        {:ok, "", %{result: "ignored", reason: "unsupported reply route: `#{msg_obj["r"]}`"}}
+        {:ok, "", state_cache,
+         %{result: "ignored", reason: "unsupported reply route: `#{msg_obj["r"]}`"}}
 
       {:error, _} = err ->
         err
     end
   end
 
-  alias Watcher.KeyStateCache
-  alias Watcher.KeyState
-  alias Watcher.KeyState.{IcpEvent, RotEvent, DipEvent}
 
   defp maybe_update_kel("icp", msg_obj, parsed_msg, state_cache) do
     with {:ok, sig_th} <- KELParser.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
@@ -155,30 +167,30 @@ defmodule Watcher.OOBI.LogsProcessor do
 
   defp check_key_state_found(_ks, _pref, _type, _said), do: :ok
 
-  defp handle_update_backers_res(res, msg_obj) do
+  defp handle_update_backers_res(res, msg_obj, state_cache) do
     case res do
       :ok ->
-        {:ok, msg_obj["d"], %{type: "rpy", result: "added witness", url: msg_obj["a"]["url"]}}
+        {:ok, msg_obj["d"], state_cache, %{type: "rpy", result: "added witness", url: msg_obj["a"]["url"]}}
 
       :not_updated ->
-        {:ok, "", %{type: "rpy", result: "ignored", reason: "already exists"}}
+        {:ok, "", state_cache,  %{type: "rpy", result: "ignored", reason: "already exists"}}
 
       error ->
         error
     end
   end
 
-  @compile {:inline, handle_update_kel_res: 3 }
-  defp handle_update_kel_res(res, event_obj, new_ks) do
+  @compile {:inline, handle_update_kel_res: 3}
+  defp handle_update_kel_res(res, event_obj, state_cache) do
     type = event_obj["t"]
 
     case res do
       {:ok, said} ->
-        {:ok, said, new_ks,
+        {:ok, said, state_cache,
          %{type: type, result: "updated KEL", pre: event_obj["i"], sn: event_obj["s"]}}
 
       :not_updated ->
-        {:ok, "", new_ks,
+        {:ok, "", state_cache,
          %{
            type: type,
            result: "ignored",
