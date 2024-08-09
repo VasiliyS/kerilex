@@ -148,10 +148,7 @@ defmodule Kerilex.Event do
       event_type == "dip" and "DND" in conf ->
         false
 
-      event_type in ["rot", "drt"] and "EO" in conf ->
-        true
-
-      "EO" in conf ->
+      event_type == "ixn" and "EO" in conf ->
         false
 
       true ->

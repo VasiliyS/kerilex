@@ -3,7 +3,9 @@ defmodule Watcher.KeyState do
   helper functions to deal with data comprising key state
   e.g. KEL entries, etc
   """
-  alias Watcher.KeyState.IcpEvent
+  alias Kerilex.Crypto.WeightedKeyThreshold
+  alias Kerilex.Crypto.KeyThreshold
+  alias Watcher.KeyState.{IcpEvent, RotEvent, DipEvent}
   alias Kerilex.Event
   import Comment
 
@@ -47,17 +49,32 @@ defmodule Watcher.KeyState do
 
   """)
 
-  @doc """
+  @typedoc """
   defines KeyState of an `AID`, used to calculate current KeyState during processing of an `OOBI` introduction
   or as updates from a Key Event Log are processed.
   """
+  @type t :: %__MODULE__{
+          p: String.t(),
+          s: non_neg_integer(),
+          d: String.t(),
+          fs: String.t(),
+          k: list(String.t()),
+          kt: %KeyThreshold{} | %WeightedKeyThreshold{},
+          n: list(String.t()),
+          nt: %KeyThreshold{} | %WeightedKeyThreshold{},
+          b: list(String.t()),
+          bt: non_neg_integer(),
+          c: list(String.t()),
+          di: Kerilex.pre()
+        }
   defstruct ~w|p s d fs k kt n nt b bt c di|a
 
   @est_events Event.est_events()
 
   def new(), do: %__MODULE__{}
 
-  def new(%{"t" => type} = est_event, sig_auth, attachments, prev_state) when type in @est_events do
+  def new(%{"t" => type} = est_event, sig_auth, attachments, prev_state)
+      when type in @est_events do
     to_state(type, est_event, sig_auth, attachments, prev_state)
   end
 
@@ -66,12 +83,13 @@ defmodule Watcher.KeyState do
     {:ok, prev_state}
   end
 
-
   defp to_state("icp", icp_event, sig_auth, _attachments, _prev_state) do
     IcpEvent.to_state(icp_event, sig_auth)
   end
 
-  alias Watcher.KeyState.RotEvent
+  defp to_state("dip", rot_event, sig_auth, _attachments, _prev_state) do
+    DipEvent.to_state(rot_event, sig_auth)
+  end
 
   defp to_state("rot", rot_event, sig_auth, attachments, %__MODULE__{} = prev_state) do
     RotEvent.to_state(rot_event, sig_auth, attachments, prev_state)

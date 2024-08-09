@@ -14,6 +14,7 @@ defmodule Watcher.KeyStateStore do
   @ks_table :state
   @backers_table :backers
   @kel_table :kel
+  # @anchors_table :anchors
 
   def create_schema(nodes \\ [node()]) do
     case :mnesia.system_info(:running_db_nodes) do
@@ -40,7 +41,7 @@ defmodule Watcher.KeyStateStore do
     Mnesia.start()
     |> case do
       :ok ->
-        Mnesia.wait_for_tables([@ks_table, @backers_table, @kel_table], 10_000)
+        Mnesia.wait_for_tables([@ks_table, @backers_table, @kel_table, @anchors_table], 10_000)
         |> case do
           {:timeout, remaining_tables} ->
             {:error, "timeout loading db tables: #{inspect(remaining_tables)}"}
@@ -104,6 +105,20 @@ defmodule Watcher.KeyStateStore do
     )
     |> handle_create_table_res(@kel_table)
   end
+
+  # maybe do this later to optimize process of checking seals
+  # defp init_anchors_table(nodes) do
+  #   Mnesia.create_table(
+  #     @anchors_table,
+  #     [
+  #       {@persistence_mode, nodes},
+  #       type: :bag,
+  #       # stores key = {pref, sn, said}, anchor_data = a map, typically a seal
+  #       attributes: ~w[prefix_sn_said anchor_data]a
+  #     ]
+  #   )
+  #   |> handle_create_table_res(@kel_table)
+  # end
 
   defp handle_create_table_res(res, table) do
     res
@@ -312,5 +327,52 @@ defmodule Watcher.KeyStateStore do
       {:aborted, reason} ->
         {:error, "lookup for pref failed, #{inspect(reason)}"}
     end
+  end
+
+  @doc """
+  checks that we have a matching sealing event in the KEL
+  """
+  @spec check_seal(Kerilex.pre(), {non_neg_integer(), binary()}, map()) ::
+          :ok
+          | :event_not_found
+          | {:error, String.t()}
+  def check_seal(pref, {sn, _said} = seal_source_couple, seal) do
+    Mnesia.dirty_read(@kel_table, {pref, sn})
+    |> case do
+      [] ->
+        :event_not_found
+
+      [{_table, _key, stored_event}] ->
+        do_check_seal(stored_event["d"], stored_event["a"], seal_source_couple, seal)
+
+      {:aborted, reason} ->
+        {:error,
+         "failed to find parent event for pref '#{pref}' at sn '#{sn}', #{inspect(reason)}"}
+    end
+  end
+
+  defp do_check_seal(_said, [], _ssc, _seal) do
+    {:error, "'a' field is empty"}
+  end
+
+  defp do_check_seal(said, anchors, {_sn, sealing_said}, seal) when said == sealing_said do
+    Enum.find_value(
+      anchors,
+      fn %{} = a ->
+        Map.equal?(a, seal)
+      end
+    )
+    |> case do
+      nil ->
+        {:error, "matching seal not found"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp do_check_seal(said, _anchors, {_sn, sealing_said} = ssc, _seal)
+       when said != sealing_said do
+    {:error, "sealing event's said(#{said}) does not match seal source couple(#{inspect(ssc)})"}
   end
 end

@@ -4,6 +4,7 @@ defmodule Watcher.OOBI.LogsProcessor do
 
   Updates persistent KEL
   """
+  alias Watcher.KeyStateCache
   alias Kerilex.Crypto.KeyTally
   alias Watcher.KeyState
   alias Watcher.EventEscrow
@@ -16,7 +17,7 @@ defmodule Watcher.OOBI.LogsProcessor do
   def process_kel(parsed_kel, escrow) when is_list(parsed_kel) do
     parsed_kel
     |> Enum.reduce_while(
-      {escrow, KeyState.new()},
+      {escrow, KeyStateCache.new()},
       fn msg, {escrow, key_state} ->
         case process_kel_msg(msg, escrow, key_state) do
           {:ok, escrow, key_state} ->
@@ -26,9 +27,9 @@ defmodule Watcher.OOBI.LogsProcessor do
             {:ok, escrow} = escrow |> EventEscrow.add_event(said, event_obj)
             {:cont, {escrow, key_state}}
 
-          {:error, reason} = err ->
+          {:error, reason} ->
             Logger.debug(%{msg: "failed to process KEL message", error: reason})
-            {:halt, err}
+            {:halt, {:error, "failed to process a KEL message: " <> reason}}
 
           {:duplicity, said} ->
             Logger.debug(%{
@@ -66,10 +67,11 @@ defmodule Watcher.OOBI.LogsProcessor do
 
   Returns `{:ok, escrow, key_state}` , `{:error, reason}`, `{:out_of_order, said, event_obj}`.
   """
-  def process_kel_msg(%{} = parsed_msg_map, escrow, state) do
+  def process_kel_msg(%{} = parsed_msg_map, escrow, state_cache) do
     with {:ok, msg_obj} <- KELParser.check_msg_integrity(parsed_msg_map),
          :ok <- msg_obj |> Event.check_labels(),
-         {:ok, said, state, res} <- maybe_update_kel(msg_obj["t"], msg_obj, parsed_msg_map, state) do
+         {:ok, said, state, res} <-
+           maybe_update_kel(msg_obj["t"], msg_obj, parsed_msg_map, state_cache) do
       Logger.debug(Map.put(res, :msg, "added event"))
 
       escrow |> process_escrow(said, state)
@@ -95,33 +97,63 @@ defmodule Watcher.OOBI.LogsProcessor do
     end
   end
 
+  alias Watcher.KeyStateCache
   alias Watcher.KeyState
-  alias Watcher.KeyState.{IcpEvent, RotEvent}
+  alias Watcher.KeyState.{IcpEvent, RotEvent, DipEvent}
 
-  defp maybe_update_kel("icp", msg_obj, parsed_msg, _prev_state) do
+  defp maybe_update_kel("icp", msg_obj, parsed_msg, state_cache) do
     with {:ok, sig_th} <- KELParser.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
          {:ok, icp_event} <- IcpEvent.from_ordered_object(msg_obj),
          {:ok, key_state} <- KeyState.new(icp_event, sig_th, parsed_msg, KeyState.new()) do
+      state_cache = state_cache |> KeyStateCache.put_key_state(msg_obj["i"], key_state)
+
       {icp_event["i"], 0}
       |> KeyStateStore.maybe_update_kel(icp_event)
-      |> handle_update_kel_res(icp_event, key_state)
+      |> handle_update_kel_res(icp_event, state_cache)
     end
   end
 
-  defp maybe_update_kel("rot", msg_obj, parsed_msg, prev_state) do
+  defp maybe_update_kel("dip", msg_obj, parsed_msg, state_cache) do
+    with {:ok, sig_th} <- KELParser.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
+         {:ok, dip_event} <- DipEvent.from_ordered_object(msg_obj),
+         {:ok, key_state} <- KeyState.new(dip_event, sig_th, parsed_msg, KeyState.new()),
+         {:ok, [ssc]} <- KELParser.get_source_seal_couples(parsed_msg),
+         :ok <- KeyStateStore.check_seal(dip_event["di"], ssc, DipEvent.seal(dip_event)) do
+      state_cache = state_cache |> KeyStateCache.put_key_state(msg_obj["i"], key_state)
+
+      {dip_event["i"], 0}
+      |> KeyStateStore.maybe_update_kel(dip_event)
+      |> handle_update_kel_res(dip_event, state_cache)
+    end
+  end
+
+  defp maybe_update_kel("rot", msg_obj, parsed_msg, state_cache) do
     with {:ok, rot_event} <- RotEvent.from_ordered_object(msg_obj),
-        {:ok, sig_th} <- KeyTally.new(rot_event["kt"]),
+         {:ok, sig_th} <- KeyTally.new(rot_event["kt"]),
+         pref = msg_obj["i"],
+         prev_state = state_cache |> KeyStateCache.get_key_state(pref),
+         :ok <-
+           check_key_state_found(prev_state, pref, "rot", msg_obj["d"]),
          {:ok, key_state} <- KeyState.new(rot_event, sig_th, parsed_msg, prev_state),
          :ok <- KELParser.check_sigs_on_rot_msg(msg_obj, key_state.b, parsed_msg) do
+      state_cache = state_cache |> KeyStateCache.put_key_state(msg_obj["i"], key_state)
+
       {rot_event["i"], rot_event["s"]}
       |> KeyStateStore.maybe_update_kel(rot_event)
-      |> handle_update_kel_res(rot_event, key_state)
+      |> handle_update_kel_res(rot_event, state_cache)
     end
   end
 
   defp maybe_update_kel(type, msg_obj, _parsed_msg, _prev_state) do
     {:ok, msg_obj["d"], %{result: "ignored", reason: "unsupported message type: '#{type}'"}}
   end
+
+  @compile {:inline, check_key_state_found: 4}
+  defp check_key_state_found(ks, pref, type, said) when ks == nil do
+    {:error, "no intermediate key state found, pref ='#{pref}' type='#{type}' said='#{said}'"}
+  end
+
+  defp check_key_state_found(_ks, _pref, _type, _said), do: :ok
 
   defp handle_update_backers_res(res, msg_obj) do
     case res do
@@ -136,6 +168,7 @@ defmodule Watcher.OOBI.LogsProcessor do
     end
   end
 
+  @compile {:inline, handle_update_kel_res: 3 }
   defp handle_update_kel_res(res, event_obj, new_ks) do
     type = event_obj["t"]
 

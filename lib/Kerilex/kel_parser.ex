@@ -182,6 +182,17 @@ defmodule Kerilex.KELParser do
   end
 
   @doc """
+    returns a list of the source sealcouples
+  """
+  def get_source_seal_couples(%{} = parsed_msg) do
+    Map.fetch(parsed_msg, Att.seal_src_couples())
+    |> case do
+      {:ok, _} = res -> res
+      :error -> {:error, "no source seal couples found"}
+    end
+  end
+
+  @doc """
    Verifies signatures on parsed messages that have required keys, backers, etc
    this includes `rpy` and establishment messages (e.g. `icp`, `dip`)
 
@@ -206,7 +217,7 @@ defmodule Kerilex.KELParser do
            keri_msg
            |> Map.fetch(Att.idx_wit_sigs())
            |> wrap_error("missing witness signatures"),
-         {:ok, b_indices} <-  check_backer_sigs(serd_msg, wit_sigs, backers),
+         {:ok, b_indices} <- check_backer_sigs(serd_msg, wit_sigs, backers),
          :ok <- msg_obj |> check_backer_threshold(b_indices),
          {:ok, ctrl_sigs} <-
            keri_msg
@@ -263,7 +274,6 @@ defmodule Kerilex.KELParser do
       parsed_msg |> check_ctrl_threshold(c_indices)
     end
   end
-
 
   defp check_idx_sigs(parsed_msg, serd_msg, idx_sigs, key) do
     with {:ok, verkey_lst} <- parsed_msg |> get_list_of(key) do
