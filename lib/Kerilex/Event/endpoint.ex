@@ -33,6 +33,7 @@ defmodule Kerilex.Event.Endpoint do
 
   """)
 
+  @spec event(any(), binary() | URI.t()) :: {:ok, binary()}
   def event(wit_pre, url) do
     uri = URI.parse(url)
     scheme = uri.scheme
