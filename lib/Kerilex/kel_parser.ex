@@ -207,7 +207,6 @@ defmodule Kerilex.KELParser do
     end
   end
 
-
   @doc """
    Verifies signatures or `rot` and `drt` that depend on state calculations
 
@@ -283,16 +282,16 @@ defmodule Kerilex.KELParser do
   end
 
   defp get_list_of(parsed_msg, key) do
-    parsed_msg
-    |> OO.fetch(key)
+    parsed_msg[key]
+    # |> OO.fetch(key)
     |> case do
-      {:ok, lst} = res when is_list(lst) ->
-        res
+      lst when is_list(lst) ->
+        {:ok, lst}
 
-      {:ok, val} ->
+       val when val != nil ->
         {:error, "expected a list under label '#{key}', got: #{inspect(val)}"}
 
-      :error ->
+      nil ->
         {:error, "msg missing data under key: '#{key}'"}
     end
   end
@@ -343,9 +342,10 @@ defmodule Kerilex.KELParser do
 
   ################## threshold validation #######################
 
-  defp check_backer_threshold(parsed_msg, indices) do
+  defp check_backer_threshold(event, indices) when is_struct(event, OO) do
     with {:ok, bt} <-
-           parsed_msg
+           event
+          #  |> IO.inspect(label: "event in check_backer_threshold")
            |> OO.fetch("bt")
            |> wrap_error("backer threshold entry ('bt') is missing"),
          {t, ""} <-
@@ -358,6 +358,15 @@ defmodule Kerilex.KELParser do
       else
         :ok
       end
+    end
+  end
+
+  defp check_backer_threshold(event, indices) do
+    if length(indices) < event["bt"] do
+      {:error,
+       "number of backers sigs (#{length(indices)}) is lower than the required threshold: #{event["bt"]}"}
+    else
+      :ok
     end
   end
 

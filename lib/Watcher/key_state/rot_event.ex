@@ -1,6 +1,8 @@
 defmodule Watcher.KeyState.RotEvent do
   @moduledoc """
   defines rotation (`rot`) event map for storing in the Key State Store
+
+  functions can be used for 'drt' event as well.
   """
   @keys Kerilex.Event.rot_labels()
 
@@ -70,23 +72,28 @@ defmodule Watcher.KeyState.RotEvent do
 
   """)
 
+  alias Watcher.KeyState.Establishment
+  alias Kerilex.Attachment
+  alias Attachment.{IndexedControllerSig}
+  alias Watcher.KeyState
+  alias Jason.OrderedObject, as: OO
+  alias Watcher.KeyStateEvent, as: KSE
+  alias Kerilex.Crypto.KeyTally
+
+  @behaviour KSE
+  @behaviour Establishment
+
+  @impl KSE
   def new do
     Map.from_keys(@keys, nil)
   end
 
-  alias Kerilex.Attachment
-  alias Attachment.{IndexedControllerSig}
-  alias Watcher.KeyState
-  alias Kerilex.Crypto.KeyTally
-
   @sigs_key Attachment.idx_ctrl_sigs()
-
-  alias Jason.OrderedObject, as: OO
-  alias Watcher.KeyStateEvent, as: KSE
 
   ################  conversion functionality, from parsed event (Jason.OrderedObject) to  simplified map ready for processing and storage
 
-  def from_ordered_object(%OO{} = msg_obj) do
+  @impl KSE
+  def from_ordered_object(%OO{} = msg_obj, event_module \\ __MODULE__) do
     conversions = %{
       "s" => &KSE.to_number/1,
       "bt" => &KSE.to_number/1,
@@ -94,10 +101,10 @@ defmodule Watcher.KeyState.RotEvent do
       "a" => &KSE.anchor_handler/1
     }
 
-    KSE.to_storage_format(msg_obj, Watcher.KeyState.RotEvent, conversions)
+    KSE.to_storage_format(msg_obj, event_module, conversions)
     |> case do
       :error ->
-        {:error, "failed to convert ordered object to 'rot' storage format"}
+        {:error, "failed to convert ordered object to '#{msg_obj["t"]}' storage format"}
 
       rot ->
         validate_event(rot)
@@ -116,6 +123,7 @@ defmodule Watcher.KeyState.RotEvent do
 
   #######################  validation and conversion functionality to transform rot event to a new, valid key state
 
+  @impl Establishment
   def to_state(rot_event, sig_auth, attachments, %KeyState{} = prev_state) do
     comment("""
     `rot` can do the following:
@@ -125,11 +133,12 @@ defmodule Watcher.KeyState.RotEvent do
 
      1 and 2 will be validated and calculated here
 
-     3 will be handled by the storage (as part of the OOBI/KEL stream processing),
-     which will simply take `a` field and store it in the db.
+     3  is handled by the storage (as part of the OOBI/KEL stream processing),
+     which will simply stores the event along with its `a` field.
     """)
 
-    with {:ok, sig_auth} <- validate_new_keys(prev_state, rot_event, sig_auth, attachments),
+    with :ok <- check_delegation(prev_state.di, rot_event["t"]),
+         {:ok, sig_auth} <- validate_new_keys(prev_state, rot_event, sig_auth, attachments),
          {:ok, b} <-
            new_backers(prev_state.b, rot_event["ba"], rot_event["br"], rot_event["bt"]),
          {:ok, rot_auth} <- KeyTally.new(rot_event["nt"]) do
@@ -149,7 +158,25 @@ defmodule Watcher.KeyState.RotEvent do
        }}
     else
       {:error, msg} ->
-        {:error, "failed to create KeyState object from 'rot' event, " <> msg}
+        {:error, "failed to create KeyState object from '#{rot_event["t"]}' event, " <> msg}
+    end
+  end
+
+  @compile {:inline, check_delegation: 2}
+  defp check_delegation(di, event_type) do
+    case event_type do
+      "rot" ->
+        if di == false do
+          :ok
+        else
+          {:error, "attempted to use 'rot' event on a delegated aid, di='#{di}'"}
+        end
+      "drt" ->
+        if di == false do
+          {:error, "attempted to use 'drt' event and 'di' in key state is false"}
+        else
+          :ok
+        end
     end
   end
 
@@ -246,67 +273,6 @@ defmodule Watcher.KeyState.RotEvent do
       {:error, _} = err -> err
     end
   end
-
-  # def sig_idx_pairs(sig_keys, idx_ctrl_sigs, prio_next_keys)
-  #     # this is wrong!, sigs are primary not the keys
-  #     when length(sig_keys) == length(idx_ctrl_sigs) do
-  #   sig_keys
-  #   |> Enum.with_index()
-  #   |> Enum.reduce_while(
-  #     [],
-  #     fn {skey, sk_idx}, acc ->
-  #       prio_next_key = Kerilex.Crypto.hash_and_encode!(skey)
-  #       found_at = Enum.find_index(prio_next_keys, &Kernel.==(&1, prio_next_key))
-
-  #       find_in_sigs(sk_idx, found_at, idx_ctrl_sigs)
-  #       |> case do
-  #         {:error, _} = res ->
-  #           {:halt, res}
-
-  #         oind ->
-  #           {:cont, [{sk_idx, oind} | acc]}
-  #       end
-  #     end
-  #   )
-  #   |> case do
-  #     {:error, _} = res ->
-  #       res
-
-  #     res ->
-  #       # reverse and trasform for consuption by KeyTally
-  #       {:ok,
-  #        Enum.reduce(res, {[], []}, fn {cur_idx, prio_next_idx}, {cur_idxs, pn_idxs} ->
-  #          {[cur_idx | cur_idxs], [prio_next_idx | pn_idxs]}
-  #        end)}
-  #   end
-  # end
-
-  # def sig_idx_pairs(sig_keys, idx_ctrl_sigs, _pnk) do
-  #   {:error,
-  #    "length of the signing 'k' list (#{length(sig_keys)}) differs from the number of attached sigs (#{length(idx_ctrl_sigs)})"}
-  # end
-
-  # defp find_in_sigs(_sk_idx, nil, _idx_ctrl_sigs) do
-  #   # this key is completely new!
-  #   nil
-  # end
-
-  # defp find_in_sigs(sk_idx, found_at, idx_ctrl_sigs) do
-  #   Enum.find_value(idx_ctrl_sigs, fn %IndexedControllerSig{ind: ind, oind: oind} ->
-  #     cond do
-  #       ind != sk_idx ->
-  #         nil
-
-  #       ind == sk_idx and (oind == found_at or oind == nil) ->
-  #         # sigs whose key has the same index in both lists don't produce oind
-  #         oind || found_at
-
-  #       ind == sk_idx and oind != found_at ->
-  #         {:error,
-  #          "mismatch: prio next key found at ind(#{found_at}), indexed controller signature oind(#{oind || "nil"})"}
-  #     end
-  #   end)
-  # end
 
   def new_backers(prev_backers, rot_ba, rot_br, rot_bt) do
     comment("""

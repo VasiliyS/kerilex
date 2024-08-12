@@ -15,17 +15,22 @@ defmodule Kerilex.Event do
   # inception labels
   @icp_labels ~w[v t d i s kt k nt n bt b c a]
 
-  # rotation labels
-  @rot_labels ~w[v t d i s p kt k nt n bt br ba a]
-
-  # interaction event labels
-  @ixn_labels ~w[v t d i s p a]
-
   # delegated inception labels
   @dip_labels ~w[v t d i s kt k nt n bt b c a di]
 
+
+  # rotation labels
+  @rot_labels ~w[v t d i s p kt k nt n bt br ba a]
+
   # delegated rotation labels
-  @drt_labels ~w[v t d i s p kt k nt n bt br ba c a]
+  # note: TOIP's KERI spec also define a `c` field (between `ba` and `a`)
+  # see here: https://trustoverip.github.io/tswg-keri-specification/#delegated-inception-event-message-body
+  # that spec is version 2.0
+  # however, keripy implementation knows only the fields below (ver 1.0)
+  @drt_labels ~w[v t d i s p kt k nt n bt br ba a]
+
+  # interaction event labels
+  @ixn_labels ~w[v t d i s p a]
 
 
   # key state notice labels

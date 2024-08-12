@@ -5,7 +5,7 @@ defmodule Watcher.KeyState do
   """
   alias Kerilex.Crypto.WeightedKeyThreshold
   alias Kerilex.Crypto.KeyThreshold
-  alias Watcher.KeyState.{IcpEvent, RotEvent, DipEvent}
+  alias Watcher.KeyState.{IcpEvent, RotEvent, DipEvent, DrtEvent}
   alias Kerilex.Event
   import Comment
 
@@ -93,6 +93,10 @@ defmodule Watcher.KeyState do
 
   defp to_state("rot", rot_event, sig_auth, attachments, %__MODULE__{} = prev_state) do
     RotEvent.to_state(rot_event, sig_auth, attachments, prev_state)
+  end
+
+  defp to_state("drt", rot_event, sig_auth, attachments, %__MODULE__{} = prev_state) do
+    DrtEvent.to_state(rot_event, sig_auth, attachments, prev_state)
   end
 
   defp to_state(type, _ee, _sig_auth, _atts, _prev_state) do

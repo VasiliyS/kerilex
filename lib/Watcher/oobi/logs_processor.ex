@@ -4,6 +4,7 @@ defmodule Watcher.OOBI.LogsProcessor do
 
   Updates persistent KEL
   """
+  alias Watcher.KeyStateEvent
   alias Kerilex.Crypto.KeyTally
   alias Kerilex.KELParser
   alias Kerilex.Event
@@ -12,14 +13,14 @@ defmodule Watcher.OOBI.LogsProcessor do
   alias Watcher.KeyState.Endpoint
   alias Watcher.KeyStateStore
   alias Watcher.KeyState
-  alias Watcher.KeyState.{IcpEvent, RotEvent, DipEvent, IxnEvent}
+  alias Watcher.KeyState.{IcpEvent, RotEvent, DipEvent, IxnEvent, DrtEvent}
   alias Watcher.KeyStateCache
 
   require Logger
 
   @doc """
   Takes output of `Kerilex.KELParser.parse/1`, verifies each entry and updates the `KeyState` accordingly.
-  returns either {:ok, escrow, key_state} or an error
+  returns either {:ok, escrow, key_state_cache}, {:duplicity, {pref, sn, stored_event}, serialized_duplicate_event } or an {:error, reason}
   """
   def process_kel(parsed_kel, escrow) when is_list(parsed_kel) do
     parsed_kel
@@ -38,13 +39,14 @@ defmodule Watcher.OOBI.LogsProcessor do
             Logger.debug(%{msg: "failed to process KEL message", error: reason})
             {:halt, {:error, "failed to process a KEL message: " <> reason}}
 
-          {:duplicity, said} ->
+          {:duplicity, pref, sn, new_event, stored_event} ->
             Logger.debug(%{
               msg: "failed to process KEL message",
-              error: "potential duplicity detected"
+              error:
+                "potential duplicity detected, pref='#{pref} sn='#{sn}' new event='#{new_event["t"]}' stored event='#{stored_event["t"]}'"
             })
 
-            {:halt, {:duplicity, said, Map.fetch!(msg, :serd_msg)}}
+            {:halt, {:duplicity, {pref, sn, stored_event}, Map.fetch!(msg, :serd_msg)}}
         end
       end
     )
@@ -62,7 +64,6 @@ defmodule Watcher.OOBI.LogsProcessor do
     # TODO(VS): implement escrow handling logic
     {:ok, escrow, state}
   end
-
 
   @doc """
   Takes one entry from `Kerilex.KELParser.parse/1` output, performs various integrity checks on it
@@ -83,6 +84,13 @@ defmodule Watcher.OOBI.LogsProcessor do
     end
   end
 
+  @spec maybe_update_kel(nonempty_binary(), Jason.OrderedObject.t(), map(), KeyStateCache.t()) ::
+          {:ok, String.t(), KeyStateCache.t(), map()}
+          | {:out_of_order, String.t(), map()}
+          | {:error, String.t()}
+          | {:duplicity, String.t(), String.t()}
+  defp maybe_update_kel(event_type, msg_obj, parsed_msg, state_cache)
+
   defp maybe_update_kel("ixn", msg_obj, parsed_msg, state_cache) do
     with {:ok, ixn_event} <- IxnEvent.from_ordered_object(msg_obj),
          pref = ixn_event["i"],
@@ -91,7 +99,6 @@ defmodule Watcher.OOBI.LogsProcessor do
          :ok <- IxnEvent.check_sigs(parsed_msg, curr_key_state) do
       KeyStateStore.maybe_update_kel({pref, ixn_event["s"]}, ixn_event)
       |> handle_update_kel_res(ixn_event, state_cache)
-
     end
   end
 
@@ -112,7 +119,6 @@ defmodule Watcher.OOBI.LogsProcessor do
     end
   end
 
-
   defp maybe_update_kel("icp", msg_obj, parsed_msg, state_cache) do
     with {:ok, sig_th} <- KELParser.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
          {:ok, icp_event} <- IcpEvent.from_ordered_object(msg_obj),
@@ -130,7 +136,7 @@ defmodule Watcher.OOBI.LogsProcessor do
          {:ok, dip_event} <- DipEvent.from_ordered_object(msg_obj),
          {:ok, key_state} <- KeyState.new(dip_event, sig_th, parsed_msg, KeyState.new()),
          {:ok, [ssc]} <- KELParser.get_source_seal_couples(parsed_msg),
-         :ok <- KeyStateStore.check_seal(dip_event["di"], ssc, DipEvent.seal(dip_event)) do
+         :ok <- KeyStateStore.check_seal(dip_event["di"], ssc, KeyStateEvent.seal(dip_event)) do
       state_cache = state_cache |> KeyStateCache.put_key_state(msg_obj["i"], key_state)
 
       {dip_event["i"], 0}
@@ -139,25 +145,49 @@ defmodule Watcher.OOBI.LogsProcessor do
     end
   end
 
-  defp maybe_update_kel("rot", msg_obj, parsed_msg, state_cache) do
-    with {:ok, rot_event} <- RotEvent.from_ordered_object(msg_obj),
-         {:ok, sig_th} <- KeyTally.new(rot_event["kt"]),
-         pref = msg_obj["i"],
-         prev_state = state_cache |> KeyStateCache.get_key_state(pref),
-         :ok <-
-           check_key_state_found(prev_state, pref, "rot", msg_obj["d"]),
-         {:ok, key_state} <- KeyState.new(rot_event, sig_th, parsed_msg, prev_state),
-         :ok <- KELParser.check_sigs_on_rot_msg(msg_obj, key_state.b, parsed_msg) do
-      state_cache = state_cache |> KeyStateCache.put_key_state(msg_obj["i"], key_state)
+  defp maybe_update_kel("drt", msg_obj, parsed_msg, state_cache) do
+    with {:ok, drt_event} <-
+           DrtEvent.from_ordered_object(msg_obj),
+         {:ok, di} <- fetch_key_from_state_cache(state_cache, drt_event["i"], :di),
+         {:ok, [ssc]} <- KELParser.get_source_seal_couples(parsed_msg),
+         :ok <- KeyStateStore.check_seal(di, ssc, KeyStateEvent.seal(drt_event)) do
+      do_rot_event_update_kel(drt_event, parsed_msg, state_cache)
+    else
+      {:event_not_found, ssc} ->
+        {:error, "anchoring event not found, seal source couple='#{inspect(ssc)}'"}
 
-      {rot_event["i"], rot_event["s"]}
-      |> KeyStateStore.maybe_update_kel(rot_event)
-      |> handle_update_kel_res(rot_event, state_cache)
+      err ->
+        err
     end
   end
 
-  defp maybe_update_kel(type, msg_obj, _parsed_msg, _prev_state) do
-    {:ok, msg_obj["d"], %{result: "ignored", reason: "unsupported message type: '#{type}'"}}
+  defp maybe_update_kel("rot", msg_obj, parsed_msg, state_cache) do
+    case RotEvent.from_ordered_object(msg_obj) do
+      {:ok, rot_event} ->
+        do_rot_event_update_kel(rot_event, parsed_msg, state_cache)
+    end
+  end
+
+  defp maybe_update_kel(type, msg_obj, _parsed_msg, state_cache) do
+    {:ok, msg_obj["d"], state_cache,
+     %{result: "ignored", reason: "unsupported message type: '#{type}'"}}
+  end
+
+  @compile {:inline, do_rot_event_update_kel: 3}
+  defp do_rot_event_update_kel(rot_event, parsed_msg, state_cache) do
+    with {:ok, sig_th} <- KeyTally.new(rot_event["kt"]),
+         pref = rot_event["i"],
+         prev_state = state_cache |> KeyStateCache.get_key_state(pref),
+         :ok <-
+           check_key_state_found(prev_state, pref, rot_event["t"], rot_event["d"]),
+         {:ok, key_state} <- KeyState.new(rot_event, sig_th, parsed_msg, prev_state),
+         :ok <- KELParser.check_sigs_on_rot_msg(rot_event, key_state.b, parsed_msg) do
+      state_cache = state_cache |> KeyStateCache.put_key_state(pref, key_state)
+
+      {pref, rot_event["s"]}
+      |> KeyStateStore.maybe_update_kel(rot_event)
+      |> handle_update_kel_res(rot_event, state_cache)
+    end
   end
 
   @compile {:inline, check_key_state_found: 4}
@@ -167,13 +197,28 @@ defmodule Watcher.OOBI.LogsProcessor do
 
   defp check_key_state_found(_ks, _pref, _type, _said), do: :ok
 
+  @compile {:inline, fetch_key_from_state_cache: 3}
+  defp fetch_key_from_state_cache(ksc, pref, key) do
+    case KeyStateCache.get_key_state(ksc, pref) do
+      ks when ks != nil ->
+        {:ok, Map.fetch!(ks, key)}
+
+      _ ->
+        {:error, "no intermediate key state found, pref ='#{pref}'"}
+    end
+  rescue
+    _ ->
+      {:error, "requested key('#{inspect({key})}' is not in the key state.)"}
+  end
+
   defp handle_update_backers_res(res, msg_obj, state_cache) do
     case res do
       :ok ->
-        {:ok, msg_obj["d"], state_cache, %{type: "rpy", result: "added witness", url: msg_obj["a"]["url"]}}
+        {:ok, msg_obj["d"], state_cache,
+         %{type: "rpy", result: "added witness", url: msg_obj["a"]["url"]}}
 
       :not_updated ->
-        {:ok, "", state_cache,  %{type: "rpy", result: "ignored", reason: "already exists"}}
+        {:ok, "", state_cache, %{type: "rpy", result: "ignored", reason: "already exists"}}
 
       error ->
         error
@@ -202,9 +247,10 @@ defmodule Watcher.OOBI.LogsProcessor do
       {:out_of_order, said} ->
         {:out_of_order, said, event_obj}
 
-      {:duplicate, type_stored_event, said_stored_event} ->
-        {:error,
-         "duplicate event detected, already have event '#{type_stored_event}' at sn #{event_obj["s"]}, 'd' is '#{said_stored_event}'"}
+      {:duplicity, _pref, _sn, _event, _stored_event} = dup ->
+        # {:error,
+        #  "duplicate event detected, already have event '#{type_stored_event}' at sn #{event_obj["s"]}, 'd' is '#{said_stored_event}'"}
+        dup
 
       error ->
         error

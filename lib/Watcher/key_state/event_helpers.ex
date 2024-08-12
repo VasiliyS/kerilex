@@ -1,10 +1,45 @@
+defmodule Watcher.KeyState.Establishment do
+  @moduledoc """
+  defines Establishment behaviour
+  """
+  alias Watcher.KeyState
+  alias Kerilex.Crypto.{WeightedKeyThreshold, KeyThreshold}
+  @doc "use parsed and processed event to calculate new state"
+  @callback to_state(
+              event :: map(),
+              sig_auth :: %WeightedKeyThreshold{} | %KeyThreshold{},
+              parsed_event :: map(),
+              key_state :: %KeyState{}
+            ) :: {:ok, %KeyState{}} | {:error, String.t()}
+end
+
 defmodule Watcher.KeyStateEvent do
   @moduledoc """
   Utility functions for converting `Jason.OrderedObject` to maps for storage in the Key State Store
+
+  Also defines defines behaviour for events
   """
 
   alias Jason.OrderedObject, as: OO
   alias Watcher.KeyState.Seal
+
+  @doc "create a new, empty KEL event that has all the mandatory fields"
+  @callback new() :: map()
+
+  @doc "converts `Jason.OrderedObject` to a map optimized for processing and storage"
+  @callback from_ordered_object(msg_obj :: Jason.OrderedObject.t(), event_module :: atom()) ::
+              {:ok, map()} | {:error, String.t()}
+
+  @doc """
+  construct a seal %{d, i, s} from a delegated event
+  """
+  def seal(%{} = dip_event) do
+    %{
+      "d" => dip_event["d"],
+      "i" => dip_event["i"],
+      "s" => dip_event["s"]
+    }
+  end
 
   @doc """
   check that counts (lengths) of keys and thresholds are the same
@@ -12,21 +47,43 @@ defmodule Watcher.KeyStateEvent do
   """
   def validate_sig_ths_counts(est_event) do
     kl = length(est_event["k"])
-    ktl = length(est_event["kt"])
+    ktl = length_or_count(est_event["kt"])
     nl = length(est_event["n"])
-    ntl = length(est_event["nt"])
+    ntl = length_or_count(est_event["nt"])
 
     cond do
-    kl != ktl ->
-      {:error,
-       "establishment event has mismatching signing authority configuration, count of 'k'(#{kl}) != count of 'kt'(#{ktl})"}
-    nl != ntl ->
-      {:error,
-       "establishment event has mismatching next key configuration, count of 'n'(#{nl}) != count of 'nt'(#{ntl})"}
-    true ->
-      {:ok, est_event}
+      ktl == :error or ntl == :error ->
+        {:error,
+         "establishment event has badly formatted 'nt' and/or 'kt' fields, 'kt'='#{est_event["kt"]}' 'nt'='#{est_event["nt"]}' "}
+
+      kl != ktl ->
+        {:error,
+         "establishment event has mismatching signing authority configuration, count of 'k'(#{kl}) != count of 'kt'(#{ktl})"}
+
+      nl != ntl ->
+        {:error,
+         "establishment event has mismatching next key configuration, count of 'n'(#{nl}) != count of 'nt'(#{ntl})"}
+
+      true ->
+        {:ok, est_event}
     end
   end
+
+  # nt/kt fields can either be lists or simply
+  defp length_or_count(threshold) when is_list(threshold), do: length(threshold)
+
+  defp length_or_count(threshold) when is_bitstring(threshold) do
+    case Integer.parse(threshold, 16) do
+      {t, ""} ->
+        t
+
+      _ ->
+        :error
+    end
+  end
+
+  defp length_or_count(threshold) when is_integer(threshold), do: threshold
+  defp length_or_count(_), do: :error
 
   @doc """
   takes the value of the "v" field and returns just the KERI version string. e.g. "KERI10".
@@ -42,7 +99,7 @@ defmodule Watcher.KeyStateEvent do
     # keys = module.string_keys()
 
     converter = fn
-      {k, v}, acc when is_map_key(acc, k) ->
+      {k, v}, _target_map = acc when is_map_key(acc, k) ->
         convert_field_val(field_mapping[k], v)
         |> case do
           {:ok, val} ->
@@ -88,7 +145,6 @@ defmodule Watcher.KeyStateEvent do
 
   def to_number(value) when is_integer(value), do: {:ok, value}
 
-
   @doc """
   helper for converting content of the `a` event field,
   converts a list of `Jason.OrderedObject`s, assuming that they are _seals_, to a list of maps
@@ -96,8 +152,8 @@ defmodule Watcher.KeyStateEvent do
   def anchor_handler(anchors) when is_list(anchors) do
     Enum.reduce_while(
       anchors,
-      [],
-      fn anchor, acc ->
+      {:ok, []},
+      fn anchor, {:ok, acc} ->
         case to_storage_format(anchor, Seal, %{"s" => &to_number/1}) do
           :error ->
             {:halt, :error}
@@ -108,6 +164,7 @@ defmodule Watcher.KeyStateEvent do
       end
     )
   end
+
   @doc """
   compares `KEL` data structures using `BADA` (Best Available Data Acceptance) policy
   """

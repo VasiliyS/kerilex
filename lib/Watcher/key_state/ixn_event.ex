@@ -32,17 +32,20 @@ defmodule Watcher.KeyState.IxnEvent do
 
   """)
 
+  @behaviour KSE
   @keys Kerilex.Event.ixn_labels()
 
   const(keys, @keys)
 
+  @impl KSE
   def new do
     Map.from_keys(@keys, nil)
   end
 
   ################  conversion functionality, from parsed event (Jason.OrderedObject) to simplified map ready for processing and storage
 
-  def from_ordered_object(%OO{} = msg_obj) do
+  @impl KSE
+  def from_ordered_object(%OO{} = msg_obj, _module \\ __MODULE__) do
     conversions = %{
       "s" => &KSE.to_number/1,
       "v" => &KSE.keri_version/1,

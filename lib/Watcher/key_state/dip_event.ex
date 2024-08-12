@@ -56,82 +56,42 @@ defmodule Watcher.KeyState.DipEvent do
     }
   """)
 
+  alias Watcher.KeyState
+  alias Watcher.KeyStateEvent, as: KSE
+  alias Watcher.KeyState.Establishment
+  alias Watcher.KeyState.IcpEvent
+  alias Jason.OrderedObject, as: OO
+
+  @behaviour KSE
+  @behaviour Establishment
+
   const(keys, @keys)
 
+  @impl KSE
   def new do
     Map.from_keys(@keys, nil)
   end
 
-  alias Watcher.KeyStateEvent, as: KSE
-  alias Kerilex.Crypto.KeyTally
-  alias Watcher.KeyState
-  alias Jason.OrderedObject, as: OO
+  @impl Establishment
+  def to_state(dip_event, sig_auth, _parsed_event \\ nil, _prev_state \\ nil) do
+    # reuse most of the 'icp' logic
+    case IcpEvent.to_state(dip_event, sig_auth) do
+      {:ok, key_state} ->
+        # the only difference is the 'di' field
+        {:ok, %KeyState{key_state | di: dip_event["di"]}}
 
-  def to_state(dip_event, sig_auth) do
-    case KeyTally.new(dip_event["nt"]) do
-      {:ok, next_kt} ->
-        {:ok,
-         %KeyState{
-           s: dip_event["s"],
-           d: dip_event["d"],
-           fs: DateTime.utc_now() |> DateTime.to_iso8601(),
-           k: dip_event["k"],
-           kt: sig_auth,
-           n: dip_event["n"],
-           nt: next_kt,
-           b: dip_event["b"],
-           bt: dip_event["bt"],
-           c: dip_event["c"],
-           di: dip_event["di"]
-         }}
-
-      {:error, msg} ->
-        {:error, "failed to create KeyState object from 'dip' event, " <> msg}
+      err ->
+        err
     end
   end
 
-  def from_ordered_object(%OO{} = msg_obj) do
-    conversions = %{
-      "s" => &KSE.to_number/1,
-      "bt" => &KSE.to_number/1,
-      "v" => &KSE.keri_version/1
-    }
-
-    KSE.to_storage_format(msg_obj, Watcher.KeyState.DipEvent, conversions)
-    |> case do
-      :error ->
-        {:error, "failed to convert ordered object to 'dip' storage format"}
-
-      dip ->
-        validate_event(dip)
+  @impl KSE
+  def from_ordered_object(%OO{} = msg_obj, _event_module \\ __MODULE__) do
+    # same as with 'to_state', re-use most of the 'icp' logic
+    if msg_obj["di"] == "" or msg_obj["di"] == nil do
+      {:error, "'di' field empty or missing, dip = '#{inspect(msg_obj)}'"}
+    else
+      IcpEvent.from_ordered_object(msg_obj, __MODULE__)
     end
-  end
-
-  defp validate_event(dip) do
-    cond do
-      dip["s"] != 0 ->
-        {:error, "dip event must have sn=0, got: #{dip["s"]}"}
-
-      dip["d"] != dip["i"] ->
-        {:error,
-         "said and prefix mismatch, 'd'='#{dip["d"]}' and 'i'='#{dip["i"]}' , dip = '#{inspect(dip)}'"}
-
-      dip["di"] == "" or dip["di"] == nil ->
-        {:error, "'di' field empty or missing, dip = '#{inspect(dip)}'"}
-
-      true ->
-        KSE.validate_sig_ths_counts(dip)
-    end
-  end
-
-  @doc """
-  construct a seal %{d, i, s} from a delegated event
-  """
-  def seal(%{} = dip_event) do
-    %{
-      "d" => dip_event["d"],
-      "i" => dip_event["i"],
-      "s" => dip_event["s"]
-    }
   end
 end

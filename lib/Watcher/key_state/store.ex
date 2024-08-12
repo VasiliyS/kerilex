@@ -178,7 +178,7 @@ defmodule Watcher.KeyStateStore do
           {:ok, binary()}
           | :not_updated
           | {:out_of_order, binary()}
-          | {:duplicate, String.t(), String.t()}
+          | {:duplicity, String.t(), String.t(), map(), map()}
           | {:error, String.t()}
   def maybe_update_kel({pref, sn} = key, event) do
     Mnesia.dirty_read(@kel_table, key)
@@ -205,8 +205,8 @@ defmodule Watcher.KeyStateStore do
         if stored_event["d"] == event["d"] do
           :not_updated
         else
-          #TODO(VS): add recovery handling!
-          {:duplicate, stored_event["t"], stored_event["d"]}
+          #TODO(VS): add superceding recovery handling!
+          {:duplicity, pref, sn, event, stored_event}
         end
 
       {:aborted, reason} ->
@@ -335,13 +335,13 @@ defmodule Watcher.KeyStateStore do
   """
   @spec check_seal(Kerilex.pre(), {non_neg_integer(), binary()}, map()) ::
           :ok
-          | :event_not_found
+          | {:event_not_found, tuple()}
           | {:error, String.t()}
   def check_seal(pref, {sn, _said} = seal_source_couple, seal) do
     Mnesia.dirty_read(@kel_table, {pref, sn})
     |> case do
       [] ->
-        :event_not_found
+        {:event_not_found, seal_source_couple}
 
       [{_table, _key, stored_event}] ->
         do_check_seal(stored_event["d"], stored_event["a"], seal_source_couple, seal)
