@@ -5,8 +5,11 @@ defmodule Watcher.KeyStateStore do
   * KSN (latest Key State for a prefix)
   * KEL - key event log for a prefix
   """
+  alias Jason.OrderedObject
   alias Watcher.KeyStateEvent, as: KSE
   alias Watcher.KeyState.Endpoint
+  alias Watcher.KeyState
+  alias Kerilex.Event
   alias :mnesia, as: Mnesia
   require Logger
 
@@ -25,7 +28,7 @@ defmodule Watcher.KeyStateStore do
             {:ok, :already_exists, node}
 
           {:error, reason} ->
-            {:error, "failed to create db schema, '#{inspect(reason)}'"}
+            {:error, "failed to create db schema, '#{reason_to_error(reason)}'"}
 
           res ->
             res
@@ -51,7 +54,7 @@ defmodule Watcher.KeyStateStore do
         end
 
       {:error, reason} ->
-        {:error, "could not start db, '#{inspect(reason)}'"}
+        {:error, "could not start db, '#{reason_to_error(reason)}'"}
     end
   end
 
@@ -64,10 +67,10 @@ defmodule Watcher.KeyStateStore do
              :created <- init_event_log_table(nodes) do
           :ok
         end
-
-      {:error, reason} ->
-        {:error, "could not start db, '#{inspect(reason)}'"}
     end
+  catch
+    :exit, {:error, reason} ->
+      {:error, "could not start db, '#{reason_to_error(reason)}'"}
   end
 
   defp init_ks_table(nodes) do
@@ -131,96 +134,124 @@ defmodule Watcher.KeyStateStore do
         :created
 
       {:aborted, reason} ->
-        {:error, "failed to create table '#{inspect(table)}', #{inspect(reason)}"}
+        {:error, reason}
     end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error, "failed to create table '#{inspect(table)}', #{reason_to_error(reason)}"}
   end
 
   ########################   data manipulation and access functions #####################################
 
-  def maybe_update_ks(prefix, sn, event) do
+  @spec maybe_update_ks(Kerilex.pre(), non_neg_integer(), Watcher.KeyState.t()) ::
+          {:error, String.t()}
+          | {:not_updated,
+             :equal_state
+             | {:stored_fs_gt, String.t(), KeyState.t()}
+             | {:stored_sn_gt, non_neg_integer(), KeyState.t()}}
+          | {:ok, KeyState.t() | nil}
+  def maybe_update_ks(prefix, sn, %KeyState{} = state) do
     Mnesia.dirty_read(@ks_table, prefix)
     |> case do
-      [] when sn == 0 ->
-        update_ks(prefix, sn, event)
+      [] ->
+        update_ks(prefix, sn, state)
 
-      [] when sn > 0 ->
-        :out_of_order
+      [{_table, _pref, stored_sn, prev_state}] ->
+        cond do
+          stored_sn < sn ->
+            update_ks(prefix, sn, state, prev_state)
 
-      [{_table, _pref, stored_sn, _state}] ->
-        if stored_sn <= sn do
-          update_ks(prefix, sn, event)
-        else
-          {:not_updated, stored_sn}
+          stored_sn == sn ->
+            update_ks_if_newer(prefix, sn, state, prev_state)
+
+          # important for superceeding recovery
+          stored_sn > sn ->
+            {:not_updated, {:stored_sn_gt, stored_sn, prev_state}}
         end
+    end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error, "lookup for pref failed, #{reason_to_error(reason)}"}
+  end
 
-      {:aborted, reason} ->
-        {:error, "lookup for pref failed, #{inspect(reason)}"}
+  defp update_ks_if_newer(prefix, sn, state, prev_state) do
+    cond do
+      prev_state.d == state.d ->
+        {:not_updated, :equal_state}
+
+      prev_state.fs < state.fs ->
+        update_ks(prefix, sn, state, prev_state)
+
+      prev_state.fs >= state.fs ->
+        {:not_updated, {:stored_fs_gt, prev_state.fs, prev_state}}
     end
   end
 
-  defp update_ks(prefix, sn, event) do
+  defp update_ks(prefix, sn, state, prev_state \\ nil) do
     updater = fn ->
-      Mnesia.write({@ks_table, prefix, sn, event})
+      Mnesia.write({@ks_table, prefix, sn, state})
     end
 
     Mnesia.transaction(updater)
     |> case do
       {:atomic, :ok} ->
-        :ok
+        {:ok, prev_state}
 
       {:aborted, reason} ->
         {:error,
-         "failed to write key state record for pref '#{prefix}' at sn '#{sn}', #{inspect(reason)}"}
+         "failed to write key state record for pref '#{prefix}' at sn '#{sn}', #{reason_to_error(reason)}"}
     end
   end
 
-  @spec maybe_update_kel({Kerilex.pre(), integer()}, map()) ::
-          {:ok, binary()}
-          | :not_updated
-          | {:out_of_order, binary()}
-          | {:duplicity, String.t(), String.t(), map(), map()}
+  @spec update_kel({Kerilex.pre(), integer()}, map()) ::
+          {:ok, Kerilex.said()}
+          # | :not_updated
           | {:error, String.t()}
-  def maybe_update_kel({pref, sn} = key, event) do
-    Mnesia.dirty_read(@kel_table, key)
+  def update_kel(key, event) when is_tuple(key) do
+    updater = fn ->
+      Mnesia.write({@kel_table, key, event})
+    end
+
+    Mnesia.transaction(updater)
     |> case do
-      [] ->
-        with :ok <- if(sn > 0, do: validate_config(pref, event), else: :ok),
-             :ok <- if(sn > 0, do: check_parent(pref, sn, event), else: :ok) do
-          update_kel(key, event)
-        else
-          # validate_config couldn't find icp event for the prefix
-          :no_icp_event ->
-            # missing said is the same as pref
-            {:out_of_order, pref}
-
-          # returned by check_parent
-          :no_parent_event ->
-            {:out_of_order, event["p"]}
-
-          error ->
-            error
-        end
-
-      [{_table, _key, stored_event}] ->
-        if stored_event["d"] == event["d"] do
-          :not_updated
-        else
-          #TODO(VS): add superceding recovery handling!
-          {:duplicity, pref, sn, event, stored_event}
-        end
+      {:atomic, :ok} ->
+        {:ok, event["d"]}
 
       {:aborted, reason} ->
-        {:error, "lookup for pref and sn failed, #{inspect(reason)}"}
+        {:error,
+         "failed to write new kel entry for pref '#{key |> elem(0)}', #{reason_to_error(reason)}"}
     end
   end
 
-  alias Kerilex.Event
+  @spec find_event(Kerilex.pre(), non_neg_integer()) ::
+          :key_event_not_found
+          | {:key_event_found, map()}
+  def find_event(pref, sn) do
+    # TODO(VS) try to use select to optimize on reading event into memory
+    Mnesia.dirty_read(@kel_table, {pref, sn})
+    |> case do
+      [] ->
+        :key_event_not_found
 
+      [{_table, _key, stored_event}] ->
+        {:key_event_found, stored_event}
+    end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error,
+       "failed to find parent event for pref '#{pref}' at sn '#{sn}', #{reason_to_error(reason)}"}
+  end
+
+  @spec check_parent(Kerilex.pre(), non_neg_integer(), Jason.OrderedObject.t()) ::
+          {:no_parent_event, Kerilex.said()} | :ok | {:error, String.t()}
+  @doc """
+  check that there is a previous event (sn -1) and that it's `said` is equal to the `p` field of the given event
+  """
   def check_parent(pref, sn, event) do
     Mnesia.dirty_read(@kel_table, {pref, sn - 1})
     |> case do
       [] ->
-        :no_parent_event
+        {:no_parent_event, event["p"]}
 
       [{_table, _key, stored_event}] ->
         if stored_event["d"] == event["p"] do
@@ -229,18 +260,20 @@ defmodule Watcher.KeyStateStore do
           {:error,
            "event for pref '#{pref}' at sn '#{sn}' failed parent hash check. 'p' is '#{event["d"]}', should be '#{stored_event["d"]}'"}
         end
-
-      {:aborted, reason} ->
-        {:error,
-         "failed to find parent event for pref '#{pref}' at sn '#{sn}', #{inspect(reason)}"}
     end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error,
+       "failed to find parent event for pref '#{pref}' at sn '#{sn}', #{reason_to_error(reason)}"}
   end
 
+  @spec validate_config(Kerilex.pre(), Jason.OrderedObject.t()) ::
+          :no_icp_event | :ok | {:error, String.t()}
   @doc """
   Validates if config rules of the inception event ('icp' or 'dip') allow adding given event type to the KEL.
 
   """
-  def validate_config(pref, event) do
+  def validate_config(pref, %OrderedObject{} = event) do
     Mnesia.dirty_read(@kel_table, {pref, 0})
     |> case do
       [] ->
@@ -255,27 +288,10 @@ defmodule Watcher.KeyStateStore do
           {:error,
            "inception config: '#{inspect({conf})}' for pref '#{pref}' disallows adding event type: '#{event["t"]}'"}
         end
-
-      {:aborted, reason} ->
-        {:error, "failed to find inception event for pref '#{pref}', #{inspect(reason)}"}
     end
-  end
-
-  defp update_kel(key, event) do
-    # stored_event = event |> KS.ordered_object_to_map()
-
-    updater = fn ->
-      Mnesia.write({@kel_table, key, event})
-    end
-
-    Mnesia.transaction(updater)
-    |> case do
-      {:atomic, :ok} ->
-        {:ok, event["d"]}
-
-      {:aborted, reason} ->
-        {:error, "failed to write new kel entry for pref '#{key |> elem(0)}', #{inspect(reason)}"}
-    end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error, "failed to find inception event for pref '#{pref}', #{reason_to_error(reason)}"}
   end
 
   def maybe_update_backers({_prefix, _scheme} = key, %Endpoint{} = endpoint) do
@@ -290,10 +306,10 @@ defmodule Watcher.KeyStateStore do
         else
           :not_updated
         end
-
-      {:aborted, reason} ->
-        {:error, "lookup for pref and scheme failed, #{inspect(reason)}"}
     end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error, "lookup for pref and scheme failed, #{reason_to_error(reason)}"}
   end
 
   defp update_backers(key, endpoint) do
@@ -308,8 +324,42 @@ defmodule Watcher.KeyStateStore do
 
       {:aborted, reason} ->
         {:error,
-         "failed to write new endpoint record for pref '#{key |> elem(0)}', #{inspect(reason)}"}
+         "failed to write new endpoint record for pref '#{key |> elem(0)}', #{reason_to_error(reason)}"}
     end
+  end
+
+  def get_backer_url(prefix, opt \\ [scheme: ["http", "https"]]) do
+    Keyword.fetch!(opt, :scheme)
+    |> Enum.reduce_while(
+      nil,
+      fn s, _acc ->
+        case do_get_backer_url({prefix, s}) do
+          {:ok, url} ->
+            {:halt, {:ok, url}}
+
+          :not_found ->
+            {:cont, :not_found}
+
+          {:error, _} = err ->
+            {:halt, err}
+        end
+      end
+    )
+  end
+
+  defp do_get_backer_url(key) do
+    Mnesia.dirty_read(@backers_table, key)
+    |> case do
+      [] ->
+        :not_found
+
+      [{_table, _key, %Endpoint{URL: url}}] ->
+        {:ok, url}
+    end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error,
+       "failed to read endpoint record for pref '#{key |> elem(0)}', #{reason_to_error(reason)}"}
   end
 
   @doc """
@@ -324,16 +374,91 @@ defmodule Watcher.KeyStateStore do
 
       [{_table, _prefix, sn, state}] ->
         {:ok, state, sn}
-
-      {:aborted, reason} ->
-        {:error, "lookup for pref failed, #{inspect(reason)}"}
     end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error, "lookup for pref failed, #{reason_to_error(reason)}"}
+  end
+
+  @doc """
+  perform recovery event handling and then, if successful,
+  delete hanging chain of events after a parent `ixn` or a `drt` event has been superseded
+  via recovery
+  """
+  def handle_recovery(pref, sn, recovery_callback) do
+    transactor = fn ->
+      with resp when elem(resp, 0) != :error <- recovery_callback.(),
+           {:ok, cnt} <- delete_events_starting_at(pref, sn + 1) do
+        Logger.warning("deleted #{cnt} events of the AID='#{pref}' starting at sn=#{sn + 1}")
+        resp
+      else
+        {:error, reason} ->
+          Mnesia.abort({:recovery_failed, reason})
+      end
+    end
+
+    Mnesia.transaction(transactor) |> handle_transaction_res()
+  end
+
+  defp handle_transaction_res(res) do
+    case res do
+      {:atomic, res} -> res
+      {:aborted, reason} -> reason
+    end
+  end
+
+  @doc """
+  delete all events for a prefix starting with a given sn
+  """
+  def delete_events_starting_at(pre, sn) do
+    transactor = fn ->
+      head_match = {@kel_table, {pre, :"$1"}, :_}
+      guard = [{:>=, :"$1", sn}]
+      result = :"$1"
+
+      Mnesia.select(@kel_table, [{head_match, guard, [result]}])
+      |> Enum.reduce(
+        {:ok, 0},
+        fn i, {:ok, cnt} ->
+          Mnesia.delete({@kel_table, {pre, i}})
+          {:ok, cnt + 1}
+        end
+      )
+    end
+
+    Mnesia.transaction(transactor) |> handle_transaction_res()
+  end
+
+  @doc """
+  check whether KEL has any events of a given type for the given pref and sn+1
+  """
+  def has_event_after?(pref, sn, type) do
+    do_select = fn ->
+      head_match = {@kel_table, {pref, :"$1"}, %{"t" => :"$2"}}
+      guard = [{:>=, :"$1", sn + 1}, {:==, :"$2", type}]
+      result = {:const, true}
+
+      case Mnesia.select(@kel_table, [{head_match, guard, [result]}], 1, :read) do
+        {[res], _cont} ->
+          res
+
+        {[res | _], _cont} ->
+          # this shouldn't really happen as we request 1 result in select
+          # the manual says that this is a recommendation, though.
+          res
+
+        :"$end_of_table" ->
+          false
+      end
+    end
+
+    Mnesia.transaction(do_select) |> handle_transaction_res()
   end
 
   @doc """
   checks that we have a matching sealing event in the KEL
   """
-  @spec check_seal(Kerilex.pre(), {non_neg_integer(), binary()}, map()) ::
+  @spec check_seal(Kerilex.pre(), {non_neg_integer(), Kerilex.said()}, map()) ::
           :ok
           | {:event_not_found, tuple()}
           | {:error, String.t()}
@@ -345,11 +470,11 @@ defmodule Watcher.KeyStateStore do
 
       [{_table, _key, stored_event}] ->
         do_check_seal(stored_event["d"], stored_event["a"], seal_source_couple, seal)
-
-      {:aborted, reason} ->
-        {:error,
-         "failed to find parent event for pref '#{pref}' at sn '#{sn}', #{inspect(reason)}"}
     end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error,
+       "failed to find parent event for pref '#{pref}' at sn '#{sn}', #{reason_to_error(reason)}"}
   end
 
   defp do_check_seal(_said, [], _ssc, _seal) do
@@ -375,5 +500,11 @@ defmodule Watcher.KeyStateStore do
   defp do_check_seal(said, _anchors, {_sn, sealing_said} = ssc, _seal)
        when said != sealing_said do
     {:error, "sealing event's said(#{said}) does not match seal source couple(#{inspect(ssc)})"}
+  end
+
+  defp reason_to_error(reason) when is_tuple(reason) do
+    elem(reason, 0)
+    |> Mnesia.error_description()
+    |> List.to_string()
   end
 end

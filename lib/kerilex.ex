@@ -11,8 +11,21 @@ defmodule Kerilex do
 
   @typedoc """
    QB64 transferable or non-transferable prefix
+   44 bytes
   """
-  @type pre :: <<_::44>>
+  @type pre :: String.t
+
+  @typedoc """
+   QB64 self addressing identifier aka self-certifying identifier, a digest of event
+   44 bytes
+  """
+  @type said :: String.t
+
+  @typedoc """
+  string representing a type of the event/message that can be found in a KEL
+  "rpy" |  "icp" |  "rot" |  "ixn" | "dip" | "drt"
+  """
+  @type kel_ilk :: String.t
 
   @placeholder_char "#"
 
@@ -93,5 +106,32 @@ defmodule Kerilex do
       )
 
     List.to_string(lst)
+  end
+end
+
+defmodule Kerilex.Helpers do
+  @moduledoc """
+  Helper functions to deal with common tasks when processing KERI events/messages
+  """
+
+  @spec hex_to_int(binary() | integer(), String.t()) :: {:error, String.t()} | {:ok, integer()}
+  @doc """
+  convert a hex encoded string to int, or return int, if it's not string encoded
+  return the desired error message, otherwise
+  """
+  def hex_to_int(value, err_msg) when is_bitstring(value) do
+    case Integer.parse(value, 16) do
+      {num, ""} ->
+        {:ok, num}
+
+      _ ->
+        {:error, err_msg <> " , must be a hex encoded number, got: '#{inspect(value)}'"}
+    end
+  end
+
+  def hex_to_int(value, _err_msg) when is_integer(value), do: {:ok, value}
+
+  def hex_to_int(value, err_msg) do
+    {:error, err_msg <> ", must be an int or a string, got: '#{inspect(value)}'"}
   end
 end

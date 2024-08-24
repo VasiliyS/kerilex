@@ -124,6 +124,8 @@ defmodule Watcher.KeyState.RotEvent do
   #######################  validation and conversion functionality to transform rot event to a new, valid key state
 
   @impl Establishment
+  @spec to_state(nil | maybe_improper_list() | map(), any(), any(), Watcher.KeyState.t()) ::
+          {:error, <<_::64, _::_*8>>} | {:ok, Watcher.KeyState.t()}
   def to_state(rot_event, sig_auth, attachments, %KeyState{} = prev_state) do
     comment("""
     `rot` can do the following:
@@ -171,6 +173,7 @@ defmodule Watcher.KeyState.RotEvent do
         else
           {:error, "attempted to use 'rot' event on a delegated aid, di='#{di}'"}
         end
+
       "drt" ->
         if di == false do
           {:error, "attempted to use 'drt' event and 'di' in key state is false"}
@@ -204,11 +207,13 @@ defmodule Watcher.KeyState.RotEvent do
 
     # {[cur_idx], [prior_next_idx]}, where prio_next_idx is nil for a new key
     # validate that sig_keys are either from the set of the prio next keys or new
-    {:ok, {cur_idxs, prior_next_idxs}} = sig_idx_pairs(idx_crtl_sigs, sig_keys, prev_state.n)
-
-    :ok = check_auth_ths(prior_next_idxs, prev_state.nt, "rotation autjority check failed: ")
-    :ok = check_auth_ths(cur_idxs, sig_auth, "signing authority check failed: ")
-    {:ok, sig_auth}
+    with {:ok, {cur_idxs, prior_next_idxs}} <-
+           sig_idx_pairs(idx_crtl_sigs, sig_keys, prev_state.n),
+         :ok <-
+           check_auth_ths(prior_next_idxs, prev_state.nt, "rotation autjority check failed: "),
+         :ok <- check_auth_ths(cur_idxs, sig_auth, "signing authority check failed: ") do
+      {:ok, sig_auth}
+    end
   end
 
   def check_auth_ths(sig_idxs, auth, err_msg) do
@@ -267,7 +272,7 @@ defmodule Watcher.KeyState.RotEvent do
          :match <-
            (pnk == pnk_at_oidx && :match) ||
              {:error,
-              "current signing key(#{key}) at ind(#{ind} does not match next prior key(#{pnk_at_oidx}) at oind(#{oind})"} do
+              "current signing key(#{key}) at ind(#{ind}) does not match next prior key(#{pnk_at_oidx}) at oind(#{oind})"} do
       :ok
     else
       {:error, _} = err -> err

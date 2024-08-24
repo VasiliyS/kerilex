@@ -33,11 +33,11 @@ defmodule Watcher.KeyStateEvent do
   @doc """
   construct a seal %{d, i, s} from a delegated event
   """
-  def seal(%{} = dip_event) do
+  def seal(%{} = del_event) do
     %{
-      "d" => dip_event["d"],
-      "i" => dip_event["i"],
-      "s" => dip_event["s"]
+      "d" => del_event["d"],
+      "i" => del_event["i"],
+      "s" => del_event["s"]
     }
   end
 
@@ -127,6 +127,8 @@ defmodule Watcher.KeyStateEvent do
   defp convert_field_val(nil, value), do: {:ok, value}
   defp convert_field_val(conv_fn, value), do: conv_fn.(value)
 
+
+  @spec to_number(binary() | integer()) :: :error | {:ok, integer()}
   @doc """
   Utility function, converts string encoded hex to int. Or returns the values if it is already int.
   """
