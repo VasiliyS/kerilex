@@ -95,7 +95,7 @@ defmodule Watcher.KeyState.RotEvent do
   @impl KSE
   def from_ordered_object(%OO{} = msg_obj, event_module \\ __MODULE__) do
     conversions = %{
-      "s" => &KSE.to_number/1,
+      # "s" => &KSE.to_number/1,
       "bt" => &KSE.to_number/1,
       "v" => &KSE.keri_version/1,
       "a" => &KSE.anchor_handler/1
@@ -124,8 +124,6 @@ defmodule Watcher.KeyState.RotEvent do
   #######################  validation and conversion functionality to transform rot event to a new, valid key state
 
   @impl Establishment
-  @spec to_state(nil | maybe_improper_list() | map(), any(), any(), Watcher.KeyState.t()) ::
-          {:error, <<_::64, _::_*8>>} | {:ok, Watcher.KeyState.t()}
   def to_state(rot_event, sig_auth, attachments, %KeyState{} = prev_state) do
     comment("""
     `rot` can do the following:
@@ -147,11 +145,7 @@ defmodule Watcher.KeyState.RotEvent do
       {:ok,
        %KeyState{
          prev_state
-         | p: rot_event["p"],
-           s: rot_event["s"],
-           d: rot_event["d"],
-           fs: DateTime.utc_now() |> DateTime.to_iso8601(),
-           k: rot_event["k"],
+         | k: rot_event["k"],
            kt: sig_auth,
            n: rot_event["n"],
            nt: rot_auth,

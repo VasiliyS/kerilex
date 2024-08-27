@@ -25,7 +25,7 @@ defmodule Watcher.KeyState.IcpEvent do
   @impl KSE
   def from_ordered_object(%OO{} = msg_obj, event_module \\ __MODULE__) do
     conversions = %{
-      "s" => &KSE.to_number/1,
+      # "s" => &KSE.to_number/1,
       "bt" => &KSE.to_number/1,
       "v" => &KSE.keri_version/1
     }
@@ -55,27 +55,33 @@ defmodule Watcher.KeyState.IcpEvent do
   end
 
   @impl Establishment
-  def to_state(icp_event, sig_auth, _prased_event \\ nil, _prev_state \\ nil) do
+  def to_state(icp_event, sig_auth, parsed_event \\ nil, prev_state)
+
+  def to_state(icp_event, sig_auth, _parsed_event, %KeyState{pe: pe} = prev_state)
+      when pe == nil do
     case KeyTally.new(icp_event["nt"]) do
       {:ok, next_kt} ->
         {:ok,
          %KeyState{
-           s: icp_event["s"],
-           d: icp_event["d"],
-           fs: DateTime.utc_now() |> DateTime.to_iso8601(),
-           k: icp_event["k"],
-           kt: sig_auth,
-           n: icp_event["n"],
-           nt: next_kt,
-           b: icp_event["b"],
-           bt: icp_event["bt"],
-           c: icp_event["c"],
-           di: false
+           prev_state
+           | fs: DateTime.utc_now() |> DateTime.to_iso8601(),
+             k: icp_event["k"],
+             kt: sig_auth,
+             n: icp_event["n"],
+             nt: next_kt,
+             b: icp_event["b"],
+             bt: icp_event["bt"],
+             c: icp_event["c"],
+             di: false
          }}
 
       {:error, msg} ->
         {:error, "failed to create KeyState object from '#{icp_event["t"]}' event, " <> msg}
-
     end
+  end
+
+  def to_state(icp_event, _sig_auth, _parsed_event, prev_state) do
+    {:error,
+     "inception event '#{icp_event["t"]}' requires empty KeyState, got: #{inspect(prev_state)}"}
   end
 end

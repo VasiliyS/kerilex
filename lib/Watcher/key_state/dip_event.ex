@@ -73,9 +73,9 @@ defmodule Watcher.KeyState.DipEvent do
   end
 
   @impl Establishment
-  def to_state(dip_event, sig_auth, _parsed_event \\ nil, _prev_state \\ nil) do
+  def to_state(dip_event, sig_auth, parsed_event \\ nil, %KeyState{} = prev_state) do
     # reuse most of the 'icp' logic
-    case IcpEvent.to_state(dip_event, sig_auth) do
+    case IcpEvent.to_state(dip_event, sig_auth, parsed_event, prev_state) do
       {:ok, key_state} ->
         # the only difference is the 'di' field
         {:ok, %KeyState{key_state | di: dip_event["di"]}}

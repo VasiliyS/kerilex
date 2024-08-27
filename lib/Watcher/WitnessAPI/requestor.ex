@@ -402,7 +402,6 @@ defmodule Events.TestSubscriber do
 end
 
 defmodule Watcher.TestApp do
-  alias Watcher.WitnessTalker
 
   def start() do
     WitnessMailbox.EventProcessor.register_topics()

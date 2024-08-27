@@ -52,12 +52,12 @@ def empty?(%__MODULE__{store: store}), do: store === %{}
   end
 
   @spec pop_events_waiting_for(Watcher.EventEscrow.t(), Kerilex.said()) ::
-          {:error, String.t()} | {:ok, [{OrderedObject.t(), map()}], Watcher.EventEscrow.t()}
+          :not_found | {:ok, [{OrderedObject.t(), map()}], Watcher.EventEscrow.t()}
   def pop_events_waiting_for(%__MODULE__{} = escrow, pre_said_key) do
     escrow.store
     |> Map.pop(pre_said_key, nil)
     |> case do
-      {nil, _} -> {:error, "#{inspect(pre_said_key)} is not found."}
+      {nil, _} -> :not_found
       {value, store} -> {:ok, value, %{escrow | store: store}}
     end
   end

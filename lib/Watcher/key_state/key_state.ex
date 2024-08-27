@@ -50,52 +50,78 @@ defmodule Watcher.KeyState do
   """)
 
   @typedoc """
+  iso_8601 formatted string representing timestamp
+  """
+  @type iso8601 :: String.t()
+
+  @typedoc """
   defines KeyState of an `AID`, used to calculate current KeyState during processing of an `OOBI` introduction
   or as updates from a Key Event Log are processed.
   """
   @type t :: %__MODULE__{
-          p: String.t(),
-          s: non_neg_integer(),
-          d: String.t(),
-          fs: String.t(),
-          k: list(String.t()),
+          pe: Kerilex.said(),
+          te: Kerilex.kel_ilk(),
+          se: Kerilex.int_sn(),
+          de: Kerilex.said(),
+          fs: iso8601(),
+          k: [Kerilex.qb64_pub_key(), ...],
           kt: %KeyThreshold{} | %WeightedKeyThreshold{},
-          n: list(String.t()),
+          n: [Kerilex.qb64_next_pub_key(), ...],
           nt: %KeyThreshold{} | %WeightedKeyThreshold{},
-          b: list(String.t()),
+          b: list(Kerilex.basic_pre()),
           bt: non_neg_integer(),
-          c: list(String.t()),
-          di: Kerilex.pre()
+          c: Kerilex.aid_conf(),
+          di: Kerilex.pre(),
+          last_event: {Kerilex.kel_ilk(), Kerilex.int_sn(), Kerilex.said()}
         }
-  defstruct ~w|p s d fs k kt n nt b bt c di|a
+  defstruct ~w|pe te se de fs k kt n nt b bt c di last_event|a
 
   @est_events Event.est_events()
 
   def new(), do: %__MODULE__{}
 
-  def new(%{"t" => type} = est_event, sig_auth, attachments, prev_state)
+  def new(%{"t" => type} = est_event, sig_auth, attachments, %__MODULE__{} = prev_state)
       when type in @est_events do
     to_state(type, est_event, sig_auth, attachments, prev_state)
+    |> case do
+      {:ok, new_ks} ->
+        t = est_event["t"]
+        s = est_event["s"]
+        d = est_event["d"]
+
+        {:ok,
+         %{
+           new_ks
+           | pe: est_event["p"],
+             te: t,
+             se: s,
+             de: d,
+             last_event: {t, s, d}
+         }}
+
+      err ->
+        err
+    end
   end
 
-  # non establishment events don't change key state
-  def new(_event, _attachments, prev_state) do
-    {:ok, prev_state}
+  # non establishment events don't change key state, but add their info to the state
+  def new(event, _attachments, _sig_auth, prev_state) do
+    {:ok, %{prev_state | last_event: {event["t"], event["s"], event["d"]}}}
   end
 
-  defp to_state("icp", icp_event, sig_auth, _attachments, _prev_state) do
-    IcpEvent.to_state(icp_event, sig_auth)
+  defp to_state("icp", icp_event, sig_auth, _attachments, prev_state) do
+    IcpEvent.to_state(icp_event, sig_auth, prev_state)
   end
 
-  defp to_state("dip", rot_event, sig_auth, _attachments, _prev_state) do
-    DipEvent.to_state(rot_event, sig_auth)
+  defp to_state("dip", rot_event, sig_auth, _attachments, prev_state) do
+    DipEvent.to_state(rot_event, sig_auth, prev_state)
   end
 
-  defp to_state("rot", rot_event, sig_auth, attachments, %__MODULE__{} = prev_state) do
+  defp to_state("rot", rot_event, sig_auth, attachments, prev_state) do
     RotEvent.to_state(rot_event, sig_auth, attachments, prev_state)
   end
 
-  defp to_state("drt", rot_event, sig_auth, attachments, %__MODULE__{} = prev_state) do
+  defp to_state("drt", rot_event, sig_auth, attachments, prev_state) do
     DrtEvent.to_state(rot_event, sig_auth, attachments, prev_state)
   end
 
@@ -106,12 +132,12 @@ defmodule Watcher.KeyState do
   ######################## threshold checking
 
   def check_backer_threshold(%__MODULE__{} = ks, indices) do
-      if length(indices) < ks.bt do
-        {:error,
-         "number of backers sigs (#{length(indices)}) is lower than the required threshold: #{ks.bt}"}
-      else
-        :ok
-      end
+    if length(indices) < ks.bt do
+      {:error,
+       "number of backers sigs (#{length(indices)}) is lower than the required threshold: #{ks.bt}"}
+    else
+      :ok
+    end
   end
 
   def check_ctrl_sigs(%__MODULE__{} = ks, serd_msg, ctrl_sigs) do
@@ -164,13 +190,12 @@ defmodule Watcher.KeyState do
     end
   end
 
+  # @compile {:inline, wrap_error: 2}
+  # defp wrap_error(term, msg)
 
-  @compile {:inline, wrap_error: 2}
-  defp wrap_error(term, msg)
+  # defp wrap_error(:error, msg) do
+  #   {:error, msg}
+  # end
 
-  defp wrap_error(:error, msg) do
-    {:error, msg}
-  end
-
-  defp wrap_error(term, _), do: term
+  # defp wrap_error(term, _), do: term
 end

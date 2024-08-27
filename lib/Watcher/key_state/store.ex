@@ -13,6 +13,11 @@ defmodule Watcher.KeyStateStore do
   alias :mnesia, as: Mnesia
   require Logger
 
+  @typedoc """
+  stored event is a map which, at a minimum, will have "v", "t", "s", "p" keys.
+  """
+  @type stored_event :: %{optional(String.t()) => any}
+
   @persistence_mode :disc_copies
   @ks_table :state
   @backers_table :backers

@@ -6,7 +6,7 @@ defmodule Watcher.KeyState.Establishment do
   alias Kerilex.Crypto.{WeightedKeyThreshold, KeyThreshold}
   @doc "use parsed and processed event to calculate new state"
   @callback to_state(
-              event :: map(),
+              event :: Jason.OrderedObject.t(),
               sig_auth :: %WeightedKeyThreshold{} | %KeyThreshold{},
               parsed_event :: map(),
               key_state :: %KeyState{}

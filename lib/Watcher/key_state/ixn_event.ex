@@ -47,7 +47,7 @@ defmodule Watcher.KeyState.IxnEvent do
   @impl KSE
   def from_ordered_object(%OO{} = msg_obj, _module \\ __MODULE__) do
     conversions = %{
-      "s" => &KSE.to_number/1,
+      # "s" => &KSE.to_number/1,
       "v" => &KSE.keri_version/1,
       "a" => &KSE.anchor_handler/1
     }
