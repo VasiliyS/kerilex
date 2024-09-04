@@ -3,8 +3,7 @@ defmodule Watcher.KeyState do
   helper functions to deal with data comprising key state
   e.g. KEL entries, etc
   """
-  alias Kerilex.Crypto.WeightedKeyThreshold
-  alias Kerilex.Crypto.KeyThreshold
+  alias Kerilex.Crypto.{KeyTally, WeightedKeyThreshold, KeyThreshold}
   alias Watcher.KeyState.{IcpEvent, RotEvent, DipEvent, DrtEvent}
   alias Kerilex.Event
   import Comment
@@ -127,6 +126,15 @@ defmodule Watcher.KeyState do
 
   defp to_state(type, _ee, _sig_auth, _atts, _prev_state) do
     {:error, "establishment event type: '#{type}' is not implemented"}
+  end
+
+  ######################## general functions
+  def abandoned?(%__MODULE__{} = ks) do
+    cond do
+      ks.n == [] -> true
+      KeyTally.null?(ks.nt) -> true
+      true -> false
+    end
   end
 
   ######################## threshold checking

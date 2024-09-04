@@ -56,20 +56,20 @@ defmodule Watcher.KeyStateEvent do
         {:error,
          "establishment event has badly formatted 'nt' and/or 'kt' fields, 'kt'='#{est_event["kt"]}' 'nt'='#{est_event["nt"]}' "}
 
-      kl != ktl ->
+      ktl > kl ->
         {:error,
-         "establishment event has mismatching signing authority configuration, count of 'k'(#{kl}) != count of 'kt'(#{ktl})"}
+         "establishment event has mismatching signing authority configuration, count of 'kt'(#{ktl}) > count of 'k'(#{kl})"}
 
-      nl != ntl ->
+      ntl > nl ->
         {:error,
-         "establishment event has mismatching next key configuration, count of 'n'(#{nl}) != count of 'nt'(#{ntl})"}
+         "establishment event has mismatching next key configuration, count of 'nt'(#{ntl}) > count of 'n'(#{ntl})"}
 
       true ->
         {:ok, est_event}
     end
   end
 
-  # nt/kt fields can either be lists or simply
+  # nt/kt fields can either be lists or simply a number
   defp length_or_count(threshold) when is_list(threshold), do: length(threshold)
 
   defp length_or_count(threshold) when is_bitstring(threshold) do

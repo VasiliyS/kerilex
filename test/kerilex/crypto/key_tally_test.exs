@@ -14,6 +14,22 @@ defmodule Kerilex.Crypto.KeyTallyTest do
     assert kt |> KeyTally.satisfy?(1..15 |> Enum.to_list()) == true
   end
 
+  describe "key threshold 0" do
+    test "does not satisfy empty key signature indices" do
+      {:ok, kt} = KeyTally.new(0)
+      {:ok, kt} = KeyTally.new("0")
+
+      refute kt |> KeyTally.satisfy?([])
+    end
+
+    test "does not satisfy non empty key signature indices" do
+      {:ok, kt} = KeyTally.new(0)
+      {:ok, kt} = KeyTally.new("0")
+
+      refute kt |> KeyTally.satisfy?([1, 2, 3])
+    end
+  end
+
   test "bad thresholds are correctly identified" do
     bad_thresholds = [
       ["1/3", "1/2", []],
@@ -32,7 +48,8 @@ defmodule Kerilex.Crypto.KeyTallyTest do
       [["1/2", "1/2"], 1],
       [["1/2", "1/2"], "1.0"],
       ["1/2", "1/2", []],
-      ["1/2", 0.5]
+      ["1/2", 0.5],
+      -1, "-a"
     ]
 
     Enum.each(
@@ -55,7 +72,6 @@ defmodule Kerilex.Crypto.KeyTallyTest do
       refute wkt |> KeyTally.satisfy?([0, 2])
       refute wkt |> KeyTally.satisfy?([2, 3, 4])
     end
-
 
     test "threshold with a 0 weight" do
       {:ok, wkt} = KeyTally.new(["1/2", "1/2", "1/4", "1/4", "1/4", "0"])

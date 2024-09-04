@@ -6,23 +6,32 @@ defmodule Kerilex.Crypto.KeyTally do
   alias Kerilex.Crypto.WeightedKeyThreshold, as: WKT
 
   def new(m_of_n) when is_integer(m_of_n) do
-    {:ok, %KT{threshold: m_of_n}}
+    if m_of_n >= 0 do
+      {:ok, %KT{threshold: m_of_n}}
+    else
+      {:error, "negative threshold='#{m_of_n}'"}
+    end
   end
 
   def new(m_of_n) when is_binary(m_of_n) do
     m_of_n
     |> Integer.parse(16)
     |> case do
-      {t, ""} ->
+      {t, ""} when t >= 0 ->
         {:ok, %KT{threshold: t}}
 
-      {_t, _rest} ->
+      {_t, rest} when rest != "" ->
         {:error, "wanted hex integer, got: #{m_of_n}"}
+
+      {_t, _rest} ->
+        {:error, "negative threshold='#{m_of_n}'"}
 
       _error ->
         {:error, "bad argument, can't parse '#{m_of_n}' as hex integer"}
     end
   end
+
+  def new([]), do: %WKT{size: 0, weights: [], sum: 0, ind_ranges: []}
 
   def new(thresholds) when is_list(thresholds) do
     split_pattern = :binary.compile_pattern("/")
@@ -63,6 +72,29 @@ defmodule Kerilex.Crypto.KeyTally do
   def new(data) do
     {:error,
      "bad argument, got '#{data}', expected an integer, hex encoded integer string or a list of fractions"}
+  end
+
+  def null?(kt)
+
+  def null?(%KT{threshold: 0}), do: true
+
+  def null?(%WKT{} = wkt) do
+    cond do
+      wkt.size == 0 ->
+        true
+
+      wkt.weights == [] ->
+        true
+
+      wkt.sum == 0 ->
+        true
+
+      wkt.ind_ranges == [] ->
+        true
+
+      true ->
+        false
+    end
   end
 
   def to_json(%KT{threshold: t}) do
@@ -193,7 +225,7 @@ defmodule Kerilex.Crypto.KeyTally do
   ################   threshold validation methods ###########################
 
   def satisfy?(%KT{threshold: t}, key_indices) when is_list(key_indices) do
-    if length(key_indices) >= t, do: true, else: false
+    if length(key_indices) >= t and t != 0, do: true, else: false
   end
 
   def satisfy?(%WKT{} = kt, key_indices) when is_list(key_indices) do

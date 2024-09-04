@@ -118,7 +118,7 @@ defmodule Kerilex.Derivation.Basic do
         {:error, "data must be #{size} bytes, got #{ds}"}
 
       rem(qb64_len, 4) != 0 -> # output length should be a multiple of 4 sixtets (b64 chars)
-        {:error, "combined code and data don't align   "}
+        {:error, "combined code and data don't align"}
 
       true ->
 

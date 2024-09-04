@@ -231,8 +231,8 @@ defmodule Watcher.KeyStateStore do
   @spec find_event(Kerilex.pre(), non_neg_integer()) ::
           :key_event_not_found
           | {:key_event_found, map()}
+          | {:error, String.t()}
   def find_event(pref, sn) do
-    # TODO(VS) try to use select to optimize on reading event into memory
     Mnesia.dirty_read(@kel_table, {pref, sn})
     |> case do
       [] ->
@@ -425,6 +425,7 @@ defmodule Watcher.KeyStateStore do
       |> Enum.reduce(
         {:ok, 0},
         fn i, {:ok, cnt} ->
+          # TODO(VS): add cascading delete for anchored events
           Mnesia.delete({@kel_table, {pre, i}})
           {:ok, cnt + 1}
         end
@@ -435,15 +436,25 @@ defmodule Watcher.KeyStateStore do
   end
 
   @doc """
-  check whether KEL has any events of a given type for the given pref and sn+1
+  check whether KEL has any events of a given type for the given pref and sn+1.
+  Type should be an event type (e.g. "rot", etc) or "*" to look for any event
   """
   def has_event_after?(pref, sn, type) do
-    do_select = fn ->
-      head_match = {@kel_table, {pref, :"$1"}, %{"t" => :"$2"}}
-      guard = [{:>=, :"$1", sn + 1}, {:==, :"$2", type}]
-      result = {:const, true}
+    spec =
+      if type != "*" do
+        head_match = {@kel_table, {pref, :"$1"}, %{"t" => :"$2"}}
+        guard = [{:>=, :"$1", sn + 1}, {:==, :"$2", type}]
+        result = {:const, true}
+        {head_match, guard, [result]}
+      else
+        head_match = {@kel_table, {pref, :"$1"}, :_}
+        guard = [{:>=, :"$1", sn + 1}]
+        result = {:const, true}
+        {head_match, guard, [result]}
+      end
 
-      case Mnesia.select(@kel_table, [{head_match, guard, [result]}], 1, :read) do
+    do_select = fn  ->
+      case Mnesia.select(@kel_table, [spec], 1, :read) do
         {[res], _cont} ->
           res
 

@@ -1,17 +1,20 @@
 defmodule Kerilex.Attachment.Number do
   @moduledoc false
+
   import Bitwise
   import Integer, only: [mod: 2]
 
-
-
-
+  # little trick to allow testing private functions
+  if Mix.env() == :test do
+    def test_int_to_b64_padding(num), do: int_to_b64_padding(num)
+    def test_int_to_b64_raw(num), do: int_to_b64_raw(num)
+  end
 
   @spec int_to_b64(non_neg_integer, [{:maxpadding, number} | {:nopadding, boolean}]) ::
-           {:ok, binary} | {:error, String.t()}
+          {:ok, binary} | {:error, String.t()}
   def int_to_b64(number, opts \\ [nopadding: false])
-  def int_to_b64(number, nopadding: np  ) do
 
+  def int_to_b64(number, nopadding: np) do
     {b64, ps_b64, value_len} = int_to_b64_padding(number)
 
     if np do
@@ -19,18 +22,14 @@ defmodule Kerilex.Attachment.Number do
     else
       b64
     end
-
   end
 
   def int_to_b64(number, maxpadding: max_padded_len) do
-
-
     {b64, ps_b64, value_len} = int_to_b64_padding(number)
     b64_len = byte_size(b64)
 
     res =
       cond do
-
         # desired length is greater than
         # the num of value b64 chars
         max_padded_len - value_len > 0 ->
@@ -110,14 +109,6 @@ defmodule Kerilex.Attachment.Number do
     {b64, ps_b64, value_len}
   end
 
-  def b64_padding(number) do
-    {b64, b64_len, _, _} = int_to_b64_raw(number)
-
-    ps_b64 = :binary.longest_common_prefix(["AAA", b64])
-
-    {b64, ps_b64, b64_len - ps_b64}
-  end
-
   def b64_to_int(data) when is_binary(data) do
     # calculate amount of 'A' padding to prepend
     ps = (4 - (byte_size(data) |> mod(4))) |> mod(4)
@@ -129,11 +120,12 @@ defmodule Kerilex.Attachment.Number do
         {:ok, enc_val |> :binary.decode_unsigned(:big)}
 
       :error ->
-         ds =
-         data
-         |> byte_size()
-         |> min(10)
-        {:error, "can't url_decode qb64 data: '#{binary_part(data,0,ds)}...'"}
+        ds =
+          data
+          |> byte_size()
+          |> min(10)
+
+        {:error, "can't url_decode qb64 data: '#{binary_part(data, 0, ds)}...'"}
     end
   end
 end

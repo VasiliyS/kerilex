@@ -199,12 +199,12 @@ defmodule Watcher.KeyState.RotEvent do
     sig_keys = rot_event["k"]
     # {:ok, sig_auth} = KeyTally.new(rot_event["kt"])
 
-    # {[cur_idx], [prior_next_idx]}, where prio_next_idx is nil for a new key
-    # validate that sig_keys are either from the set of the prio next keys or new
+    # {[cur_idx], [prior_next_idx]}, where prior_next_idx is nil for a new key
+    # validate that sig_keys are either from the set of the prior next keys or new
     with {:ok, {cur_idxs, prior_next_idxs}} <-
            sig_idx_pairs(idx_crtl_sigs, sig_keys, prev_state.n),
          :ok <-
-           check_auth_ths(prior_next_idxs, prev_state.nt, "rotation autjority check failed: "),
+           check_auth_ths(prior_next_idxs, prev_state.nt, "rotation authority check failed: "),
          :ok <- check_auth_ths(cur_idxs, sig_auth, "signing authority check failed: ") do
       {:ok, sig_auth}
     end
@@ -219,10 +219,14 @@ defmodule Watcher.KeyState.RotEvent do
     end
   end
 
-  def sig_idx_pairs(idx_ctrl_sigs, sig_keys, prio_next_keys) do
+  def sig_idx_pairs(_idx_ctrl_sigs, _sig_keys, [] = _prior_next_keys) do
+    {:error, "attempt to rotate abandoned AID, prior next keys n=[]"}
+  end
+
+  def sig_idx_pairs(idx_ctrl_sigs, sig_keys, prior_next_keys) do
     do_idx_pairs =
       fn %IndexedControllerSig{ind: ind, oind: oind}, {cidxs, pidxs} ->
-        case do_check_key_rules(ind, oind, sig_keys, prio_next_keys) do
+        case do_check_key_rules(ind, oind, sig_keys, prior_next_keys) do
           {:error, _} = err ->
             {:halt, err}
 
@@ -261,7 +265,7 @@ defmodule Watcher.KeyState.RotEvent do
          pnk_at_oidx = Enum.at(prior_next_keys, oind),
          :key_found <-
            (pnk_at_oidx != nil && :key_found) ||
-             {:error, "out of bound prior next key index(#{oind})"},
+             {:error, "out of bound prior next key index='#{oind}' prior next keys n='#{inspect(prior_next_keys)}' )"},
          pnk = Kerilex.Crypto.hash_and_encode!(key),
          :match <-
            (pnk == pnk_at_oidx && :match) ||

@@ -2,7 +2,7 @@
 
 **This is an experimental implementation of KERI protocol that aims to be compatible with the vLEI ecosystem**
 
-The goal of this project is to build a "validator" component that allows to monitor KERI `AID`s anf maintain up to date key state.
+The goal of this project is to build a "validator" component that allows to monitor KERI `AID`s and maintain up to date key state.
 
 It currently consists of two parts:
   * `Kerilex` - low-level functionality to parse and validate KELs, plus some ability to create and sign certain type of events.
@@ -24,10 +24,11 @@ It currently consists of two parts:
 ## How to try
 
 ### Prerequisites
-1. dev version of `libsodium`
-2. `c` toolchain to compile `libsodium` nif
-3. Rust to compile `blake3`
-4. setup proper variables pointing to the installed libs 
+1. Elixir - 1.17 and OTP27
+2. dev version of `libsodium`
+3. `c` toolchain to compile `libsodium` nif
+4. Rust to compile `blake3`
+5. setup proper variables pointing to the installed libs 
    - E.g. for `mac`, if using `brew` (works on `m1`/`m3`)
       ```bash
       LDFLAGS=-L/opt/homebrew/include
@@ -49,21 +50,22 @@ then
 mkdir -p tmp/db
 
 iex -S mix
-
+```
+```elixir
 :mnesia.stop
 
 Watcher.KeyStateStore.create_schema
 
 Watcher.KeyStateStore.init_tables
 
-gleif_geda_kel = File.read!("gleif-kel-july-23-24") |> Kerilex.KELParser.parse
+gleif_geda_kel = File.read!("test/data/gleif-kel-july-23-24") |> Kerilex.KELParser.parse
 
-gleif_geda_kel |> Watcher.OOBI.LogsProcessor.process_kel(%{})
+gleif_geda_kel |> Watcher.OOBI.LogsProcessor.process_kel()
 
 ```
 
 output
-```
+```elixir
 17:52:43.824 [debug] [type: "icp", msg: "added event", result: "updated KEL", pre: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2", sn: 0]
 
 17:52:43.826 [debug] [type: "rot", msg: "added event", result: "updated KEL", pre: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2", sn: 1]
@@ -99,14 +101,15 @@ output
 17:52:43.840 [debug] [type: "rpy", msg: "added event", result: "added witness", url: "http://54.233.109.129:5623/"]
 
 17:52:43.840 [info] [msg: "finished processing KEL messages", kel_length: 17]
-{:ok, %{},
+{:ok, %Watcher.EventEscrow{store: %{}},
  %Watcher.KeyStateCache{
    cache: %{
      "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2" => %Watcher.KeyState{
-       p: "ECphNWm1_jZOupeKh6C7TlBi81BlERqbnMpyqpnS4CJY",
-       s: 2,
-       d: "EHsL1ldIafZC-M9-3RgLQB3m2_2F0aYIiNBGnTVoFDH2",
-       fs: "2024-08-12T15:52:43.827088Z",
+       pe: "ECphNWm1_jZOupeKh6C7TlBi81BlERqbnMpyqpnS4CJY",
+       te: "rot",
+       se: 2,
+       de: "EHsL1ldIafZC-M9-3RgLQB3m2_2F0aYIiNBGnTVoFDH2",
+       fs: "2024-09-04T08:52:04.784896Z",
        k: ["DNLdWqTBKOhDO8YfE5uIaTvN-n_Jv20-5ZwK609BvG0b",
         "DL68G7IW4zT2ryLRDziYiRyvwIDyq9xssVuZ3u6w-30Y",
         "DH63RGGv_r8pQ5Di9MVblcofkBm0O8r6SUY0cqNAYqne"],
@@ -137,13 +140,15 @@ output
         "BLo6wQR73-eH5v90at_Wt8Ep_0xfz05qBjM3_B1UtKbC"],
        bt: 4,
        c: ["EO"],
-       di: false
+       di: false,
+       last_event: {"rot", 2, "EHsL1ldIafZC-M9-3RgLQB3m2_2F0aYIiNBGnTVoFDH2"}
      },
      "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS" => %Watcher.KeyState{
-       p: nil,
-       s: 0,
-       d: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS",
-       fs: "2024-08-12T15:52:43.830089Z",
+       pe: nil,
+       te: "dip",
+       se: 0,
+       de: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS",
+       fs: "2024-09-04T08:52:04.790185Z",
        k: ["DEO7QT90CzPeCubjcAgDlYI-yudt0c_4HeAb1_RbrGiF",
         "DKu6Q_Qth7x-pztt11qXDr42B9aUjkp_v9Rq8-xXcQjF",
         "DEiPSxcuILZFxJscr_Lt8fuiidhB_HrqKxoCbZr9tQfp",
@@ -175,7 +180,8 @@ output
         "BFl6k3UznzmEVuMpBOtUUiR2RO2NZkR3mKrZkNRaZedo"],
        bt: 4,
        c: [],
-       di: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2"
+       di: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2",
+       last_event: {"ixn", 8, "EDxDCjQoH82EgDEcSAU1SD__VKoebRUgr95nFweJxMgu"}
      }
    }
  }}

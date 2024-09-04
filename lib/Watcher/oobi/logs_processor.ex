@@ -1,3 +1,16 @@
+defmodule Watcher.OOBI.LogsProcessorError do
+  @moduledoc """
+  `LogsProcessorError` exception
+
+  accessible fields:
+  - `message` - erorr message
+  - `pre` - AID prefix
+  - `sn`  - int seq number of the currently processed event
+  - `key_state` - `Watcher.KeyState` struct
+  """
+  defexception ~w[message pre sn key_state]a
+end
+
 defmodule Watcher.OOBI.LogsProcessor do
   @moduledoc """
   Defines functions to process `KEL`s returned by querying `OOBI`s endpoints of a prefix
@@ -5,6 +18,7 @@ defmodule Watcher.OOBI.LogsProcessor do
   Updates persistent KEL
   """
 
+  alias Watcher.OOBI.LogsProcessorError
   alias Watcher.KeyStateEvent
   alias Kerilex.Crypto.KeyTally
   alias Kerilex.KELParser
@@ -31,7 +45,7 @@ defmodule Watcher.OOBI.LogsProcessor do
   def process_kel(parsed_kel, escrow, opts \\ [])
       when is_list(parsed_kel) and is_list(opts) and is_struct(escrow, EventEscrow) do
     ksc =
-      if key_states = opts[:keys_states] do
+      if key_states = opts[:key_states] do
         KeyStateCache.new!(key_states)
       else
         KeyStateCache.new()
@@ -178,26 +192,21 @@ defmodule Watcher.OOBI.LogsProcessor do
            Kerilex.Helpers.hex_to_int(msg_obj["s"], "event's `s` field is not properly encoded"),
          msg_obj = update_in(msg_obj["s"], fn _ -> sn end),
          :ok <-
-           (case KeyStateStore.find_event(msg_obj["i"], sn) do
-              :key_event_not_found ->
-                :ok
-
-              {:key_event_found, found_event} ->
-                # sending updates msg_obj to the else branch of with
-                {:duplicate, msg_obj, found_event}
-            end),
-         :ok <-
            check_config_and_parent(msg_obj, state_cache) do
-      # at this point we know that this event is allowed and it's parent is already processed
-      # and that this event was not processed before
-      # we are now ready to store the event in the KEL if signature checks are successful
-      maybe_update_kel(type, msg_obj, _found_event = nil, parsed_msg_map, state_cache)
-    else
-      {:duplicate, msg_obj, found_event} ->
-        maybe_update_kel(type, msg_obj, found_event, parsed_msg_map, state_cache)
+      case check_msg_in_state_cache(msg_obj["i"], sn, state_cache) do
+        :ok ->
+          # at this point we know that this event is allowed and it's parent is already processed
+          # and that this event was not processed before
+          # we are now ready to store the event in the KEL if signature checks are successful
+          maybe_update_kel(type, msg_obj, _found_event = nil, parsed_msg_map, state_cache)
 
-      err ->
-        err
+        :maybe_duplicate ->
+          try do
+            process_maybe_duplicate_msg(type, msg_obj, parsed_msg_map, state_cache)
+          catch
+            err -> err
+          end
+      end
     end
   end
 
@@ -222,16 +231,99 @@ defmodule Watcher.OOBI.LogsProcessor do
     {:error, "unsupported event: type='#{type}' said='#{msg_obj["d"]}'"}
   end
 
-  # WIP - maybe we can optimize and save direct db check ( parent, existing message)
-  # in case we are processing a new OOBI, for incremental it's likely unavoidable
-  # defp check_msg_in_state_cache(pre, sn, state_cache) do
-  #   if state = KeyStateCache.get_key_state(state_cache, pre) do
-  #     {_type, l_sn, _said} = state.last_event
-  #     if l_sn <= sn, do: :maybe_duplicate, else: :ok
-  #   else
-  #     raise "key state for pre=#{pre} is missing!, checking for existence of event with sn=#{sn}"
-  #   end
-  # end
+  defp check_msg_in_state_cache(pre, sn, state_cache) do
+    case KeyStateCache.get_last_event_for(state_cache, pre) do #|> IO.inspect(label: "last event") do
+      {:ok, {_type, le_sn, _said}} ->
+        if le_sn > sn - 1, do: :maybe_duplicate, else: :ok
+
+      :not_found ->
+        :ok
+
+      {:ok, nil} ->
+        # runtime error, either pref is not in cache (nothing has been added yet) or there must be event data
+        raise "key state for pre=#{pre} is missing!, checking for existence of event with sn=#{sn}"
+    end
+  end
+
+  defp process_maybe_duplicate_msg(type, msg_obj, parsed_msg_map, state_cache) do
+    pre = msg_obj["i"]
+    sn = msg_obj["s"]
+    # msg_obj |> IO.inspect(label: "process_maybe_duplicate_event")
+
+    found_event =
+      case KeyStateStore.find_event(pre, sn) do #|> IO.inspect(label: "find_event") do
+        {:key_event_found, found_event} ->
+          found_event
+
+        :key_event_not_found ->
+          ks = KeyStateCache.get_key_state(state_cache, pre)
+
+          raise LogsProcessorError,
+            message: "no event found in DB when processing duplicate event",
+            pre: pre,
+            sn: sn,
+            key_state: ks
+
+        {:error, _} = err ->
+          throw(err)
+      end
+
+    cond do
+      found_event["d"] == msg_obj["d"] ->
+        {:ok, nil, state_cache,
+         %{
+           type: type,
+           result: "ignored",
+           reason: "already exists",
+           pre: pre,
+           sn: sn
+         }}
+
+      type in ~w|icp dip ixn| ->
+        # these types can't replace previous events
+        {:duplicity, pre, sn, msg_obj, :not_checked}
+
+      type in ~w|rot drt| ->
+        # `rot` and `drt` can be recovery attempts
+        ks = KeyStateCache.get_key_state!(state_cache, pre)
+
+        if (ks.se >= sn and type == "rot") or
+             (type == "drt" and (ks.se > sn or (ks.se == sn and ks.te != "drt"))) do
+          {:error,
+           "kel has an establishment event type='#{ks.te}' at sn='#{ks.se}' after or at the current sn=#{sn}, superseding recovery with '#{type}' is not possible"}
+        else
+          maybe_do_recovery!(type, msg_obj, parsed_msg_map, state_cache)
+        end
+
+      true ->
+        {:error,
+         "duplicate event has unknown type='#{type} pre='#{pre}' sn=#{sn} said='#{msg_obj["d"]}'"}
+    end
+  end
+
+  defp maybe_do_recovery!(type, msg_obj, parsed_msg_map, state_cache) do
+    pre = msg_obj["i"]
+    sn = msg_obj["s"]
+
+    case(KeyStateStore.find_event(pre, sn)) do
+      {:key_event_found, found_event} ->
+        msg =
+          "potential superseding recovery detected, existing event t='#{found_event["t"]}' s='#{found_event["s"]}' said='#{found_event["d"]}'"
+
+        Logger.warning(%{msg: msg, type: type, pre: pre, sn: sn})
+        maybe_store_msg(type, found_event["t"], msg_obj, parsed_msg_map, state_cache)
+
+      :key_event_not_found ->
+        # we have an incorrect key state!, there must be an event at this key
+        ks = KeyStateCache.get_key_state!(state_cache, pre)
+
+        raise LogsProcessorError,
+          pre: pre,
+          sn: sn,
+          key_state: ks,
+          message: "failed to retrieve kel event during attempted recovery"
+    end
+  end
 
   @compile {:inline, [maybe_update_kel: 5]}
   @spec maybe_update_kel(
@@ -252,49 +344,49 @@ defmodule Watcher.OOBI.LogsProcessor do
     maybe_store_msg(type, _found_type = nil, msg_obj, parsed_msg_map, state_cache)
   end
 
-  defp maybe_update_kel(type, msg_obj, found_event, parsed_msg_map, state_cache) do
-    with :not_duplicate <-
-           if(msg_obj["d"] != found_event["d"],
-             do: :not_duplicate,
-             else: :duplicate
-           ),
-         :ok <- check_config_and_parent(msg_obj, state_cache) do
-      pre = msg_obj["i"]
-      sn = msg_obj["s"]
+  # defp maybe_update_kel(type, msg_obj, found_event, parsed_msg_map, state_cache) do
+  #   with :not_duplicate <-
+  #          if(msg_obj["d"] != found_event["d"],
+  #            do: :not_duplicate,
+  #            else: :duplicate
+  #          ),
+  #        :ok <- check_config_and_parent(msg_obj, state_cache) do
+  #     pre = msg_obj["i"]
+  #     sn = msg_obj["s"]
 
-      if msg_obj["t"] in ~w|icp dip ixn| do
-        # these types can't replace previous events
-        {:duplicity, pre, sn, msg_obj, found_event}
-      else
-        # `rot` and `drt` can be recovery attempts
-        msg =
-          "potential superseding recovery detected, existing event pre='#{found_event["i"]}' t='#{found_event["t"]}' s='#{found_event["s"]}' said='#{found_event["d"]}'"
+  #     if msg_obj["t"] in ~w|icp dip ixn| do
+  #       # these types can't replace previous events
+  #       {:duplicity, pre, sn, msg_obj, found_event}
+  #     else
+  #       # `rot` and `drt` can be recovery attempts
+  #       msg =
+  #         "potential superseding recovery detected, existing event pre='#{found_event["i"]}' t='#{found_event["t"]}' s='#{found_event["s"]}' said='#{found_event["d"]}'"
 
-        Logger.warning(%{msg: msg, type: type, pre: pre, sn: sn})
-        maybe_store_msg(type, found_event["d"], msg_obj, parsed_msg_map, state_cache)
-      end
-    else
-      :duplicate ->
-        {:ok, nil, state_cache,
-         %{
-           type: type,
-           result: "ignored",
-           reason: "already exists",
-           pre: msg_obj["i"],
-           sn: msg_obj["s"]
-         }}
+  #       Logger.warning(%{msg: msg, type: type, pre: pre, sn: sn})
+  #       maybe_store_msg(type, found_event["d"], msg_obj, parsed_msg_map, state_cache)
+  #     end
+  #   else
+  #     :duplicate ->
+  #       {:ok, nil, state_cache,
+  #        %{
+  #          type: type,
+  #          result: "ignored",
+  #          reason: "already exists",
+  #          pre: msg_obj["i"],
+  #          sn: msg_obj["s"]
+  #        }}
 
-      err ->
-        err
-    end
-  end
+  #     err ->
+  #       err
+  #   end
+  # end
 
   defp check_config_and_parent(msg_obj, state_cache) do
     pref = msg_obj["i"]
     sn = msg_obj["s"]
 
     with :ok <- if(sn > 0, do: event_allowed?(pref, msg_obj, state_cache), else: :ok),
-         :ok <- if(sn > 0, do: KeyStateStore.check_parent(pref, sn, msg_obj), else: :ok) do
+         :ok <- if(sn > 0, do: check_parent(pref, sn, msg_obj["p"], state_cache), else: :ok) do
       :ok
     else
       :no_icp_event ->
@@ -305,6 +397,25 @@ defmodule Watcher.OOBI.LogsProcessor do
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  defp check_parent(pref, sn, prev_said, state_cache) do
+    {_t, le_sn, le_said} = KeyStateCache.fetch_for!(state_cache, pref, :last_event)
+
+    cond do
+      le_sn == sn - 1 and prev_said == le_said ->
+        :ok
+
+      le_sn == sn - 1 and prev_said != le_said ->
+        {:error,
+         "event for AID pref='#{pref}' sn='#{sn}' failed parent hash check. 'p'='#{prev_said}', should be '#{le_said}'"}
+
+      le_sn < sn ->
+        {:no_parent_event, prev_said}
+
+      true ->
+        :ok  # this is likely a duplicate event, will check for recovery and rules later in teh pipeline
     end
   end
 
@@ -418,17 +529,19 @@ defmodule Watcher.OOBI.LogsProcessor do
     pre = msg_obj["i"]
     sn = msg_obj["s"]
 
-    if KeyStateStore.has_event_after?(pre, sn, "rot") do
-      {:error,
-       "kel has 'rot' events after the current sn(#{sn}), superseding recovery is not possible"}
-    else
-      attempt_recovery = fn ->
-        maybe_store_msg("rot", _found_type = nil , msg_obj, parsed_msg, state_cache)
-      end
-
-      KeyStateStore.handle_recovery(pre, sn, attempt_recovery)
-      |> handle_update_kel_res(msg_obj, state_cache)
+    # this rule is snow checked upstream using KeyState
+    # if KeyStateStore.has_event_after?(pre, sn, "rot") do
+    #   {:error,
+    #    "kel has 'rot' events after the current sn(#{sn}), superseding recovery is not possible"}
+    # else
+    attempt_recovery = fn ->
+      maybe_store_msg("rot", _found_type = nil, msg_obj, parsed_msg, state_cache)
     end
+
+    KeyStateStore.handle_recovery(pre, sn, attempt_recovery)
+    |> handle_update_kel_res(msg_obj, state_cache)
+
+    # end
   end
 
   defp maybe_store_msg(type, nil = _found_type, msg_obj, _parsed_msg, state_cache) do

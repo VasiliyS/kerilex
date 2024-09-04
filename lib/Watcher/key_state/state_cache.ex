@@ -20,7 +20,7 @@ defmodule Watcher.KeyStateCache do
     %__MODULE__{}
   end
 
-  @spec new!([{Kerilex.pre(), KeyState.t()}]) :: t()
+  @spec new!(nonempty_improper_list({Kerilex.pre(), KeyState.t()}, any())) :: t()
   @doc """
   create a new `KeySateCache` and add supplied `KeyState`s to it.
   Enables incremental update of the KEL and key states.
@@ -30,8 +30,11 @@ defmodule Watcher.KeyStateCache do
     |> Enum.reduce(
       new(),
       fn
-        {pref, %KeyState{} = ks}, ksc -> put_key_state(ksc, pref, ks)
-        v, _ksc -> raise ArgumentError, "expected a list of pairs `{pref, KeyState}`, got: '#{inspect(v)}'"
+        {pref, %KeyState{} = ks}, ksc ->
+          put_key_state(ksc, pref, ks)
+
+        v, _ksc ->
+          raise ArgumentError, "expected a list of pairs `{pref, KeyState}`, got: '#{inspect(v)}'"
       end
     )
   end
@@ -44,6 +47,22 @@ defmodule Watcher.KeyStateCache do
 
   def put_key_state(%__MODULE__{cache: c} = ksc, pre, %KeyState{} = ks) do
     %__MODULE__{ksc | cache: Map.put(c, pre, ks)}
+  end
+
+  @spec get_key_state!(t(), Kerilex.pre()) :: KeyState.t()
+  @doc """
+  returns current `KeyState` for an AID, or raises an error if not found
+  """
+  def get_key_state!(key_state_cache, pref)
+
+  def get_key_state!(%__MODULE__{cache: c}, pref) do
+    case Map.fetch(c, pref) do
+      {:ok, val} ->
+        val
+
+      :error ->
+        raise "no intermediate key state found for AID pref='#{pref}'"
+    end
   end
 
   @spec get_key_state(t(), Kerilex.pre()) :: KeyState.t() | nil
@@ -90,5 +109,43 @@ defmodule Watcher.KeyStateCache do
         ks = %{ks | last_event: {type, sn, said}}
         {:ok, %__MODULE__{ksc | cache: %{c | pref => ks}}}
     end
+  end
+
+  @spec get_last_event_for(Watcher.KeyStateCache.t(), Kerilex.pre()) ::
+          :not_found | {:ok, {Kerilex.kel_ilk(), Kerilex.int_sn(), Kerilex.said()} | nil}
+  @doc """
+  returns the value of the `last_event` field of a cached key state for the given AID if present
+  """
+  def get_last_event_for(key_state_cache, pref)
+
+  def get_last_event_for(%__MODULE__{cache: c}, pref) do
+    if le = get_in(c[pref].last_event), do: {:ok, le}, else: :not_found
+  end
+
+  @doc """
+  returns the value for a given key of the cached `KeyState` for a given AID.
+
+  raises a runtime error if AID's `KeyState` is not in the cache
+  """
+  @key_state_keys KeyState.new() |> Map.from_struct() |> Map.keys()
+
+  def fetch_for!(ksc, pref, key) when key in @key_state_keys do
+    case KeyStateCache.get_key_state(ksc, pref) do
+      ks when ks != nil ->
+        Map.fetch!(ks, key)
+
+      _ ->
+        raise "no intermediate key state found, pref ='#{pref}', wanted key='#{inspect(key)}'"
+    end
+  end
+
+  @spec get_all_aids(t()) :: list(Kerilex.pre())
+  @doc """
+  returns a list of all AIDs in the `KeyStateCache`
+  """
+  def get_all_aids(ksc)
+
+  def get_all_aids(%__MODULE__{cache: c}) do
+    Map.keys(c)
   end
 end
