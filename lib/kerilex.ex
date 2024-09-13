@@ -2,8 +2,6 @@ defmodule Kerilex do
   @moduledoc """
   Documentation for `Kerilex`.
   """
-
-
   @typedoc """
    QB64 transferable or non-transferable prefix (AID)
    44 bytes
@@ -54,6 +52,11 @@ defmodule Kerilex do
   QB64 encoded digest of `qb64_pub_key`. Used to commit to the next ste of authorized keys for an AID
   """
   @type qb64_next_pub_key() :: String.t()
+
+  @typedoc """
+  json encoded KERI event or a message
+  """
+  @type json_binary :: binary()
 
   @placeholder_char "#"
 

@@ -28,3 +28,4 @@ kerilex-*.tar
 .DS_Store
 
 .elixir_ls
+.direnv

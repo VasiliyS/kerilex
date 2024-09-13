@@ -59,7 +59,7 @@ defmodule Watcher.OOBI.LogsProcessorTest do
         :mnesia.clear_table(:kel)
 
         kel_data = %KelTestData{kel_data | parsed_kel: Enum.shuffle(test_kel)}
-        {escrow, test_state_cache} = do_log_processor_test(%{kel_data: kel_data})
+        {escrow, _test_state_cache} = do_log_processor_test(%{kel_data: kel_data})
 
         assert EventEscrow.empty?(escrow) == true
       end)
@@ -86,7 +86,7 @@ defmodule Watcher.OOBI.LogsProcessorTest do
     @tag recovery_kels:
            {"delegator-3-ixn-plus-rot-at-6.cesr", "delegator-superseding-recovery-rot-at-3.cesr"}
     test "recovery with at sn=3 not possible with existing rot at sn=6", %{
-      kel_data: %KelTestData{parsed_kel: test_kel, state_cache: ref_state_cache},
+      kel_data: %KelTestData{parsed_kel: test_kel, state_cache: _ref_state_cache},
       key_states: states
     } do
       {:error, reason} =

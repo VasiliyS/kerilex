@@ -70,7 +70,7 @@ defmodule Watcher.KeyState do
           b: list(Kerilex.basic_pre()),
           bt: non_neg_integer(),
           c: Kerilex.aid_conf(),
-          di: Kerilex.pre(),
+          di: Kerilex.pre() | false,
           last_event: {Kerilex.kel_ilk(), Kerilex.int_sn(), Kerilex.said()}
         }
   defstruct ~w|pe te se de fs k kt n nt b bt c di last_event|a

@@ -1,10 +1,11 @@
 defmodule Watcher.KeyStateStore do
   @moduledoc """
-  persistance layer for all things key state:
+  persistence layer for all things key state:
   * Backers (endpoints)
   * KSN (latest Key State for a prefix)
   * KEL - key event log for a prefix
   """
+  alias Watcher.KeyStateCache
   alias Jason.OrderedObject
   alias Watcher.KeyStateEvent, as: KSE
   alias Watcher.KeyState.Endpoint
@@ -148,16 +149,82 @@ defmodule Watcher.KeyStateStore do
 
   ########################   data manipulation and access functions #####################################
 
-  @spec maybe_update_ks(Kerilex.pre(), non_neg_integer(), Watcher.KeyState.t()) ::
-          {:error, String.t()}
-          | {:not_updated,
-             :equal_state
-             | {:stored_fs_gt, String.t(), KeyState.t()}
-             | {:stored_sn_gt, non_neg_integer(), KeyState.t()}}
-          | {:ok, KeyState.t() | nil}
-  def maybe_update_ks(prefix, sn, %KeyState{} = state) do
-    Mnesia.dirty_read(@ks_table, prefix)
+  @spec maybe_update_ks(KeyStateCache.t()) :: :ok | {:error, String.t()}
+  def maybe_update_ks(ksc) do
+    updater = fn ->
+      KeyStateCache.get_all_aids(ksc)
+      |> Enum.reduce(
+        :ok,
+        fn pre, _res ->
+          ks = KeyStateCache.get_key_state!(ksc, pre)
+
+          Mnesia.read(@ks_table, pre)
+          |> do_update_ks(pre, ks)
+          |> case do
+            {:ok, _prev_state} ->
+              :ok
+
+            {:not_updated, :equal_state} ->
+              :ok
+
+            {:not_updated, {:stored_fs_gt, sn, _stored_fs, stored_state}} ->
+              err = update_ks_error_newer_stored_state(pre, sn, ks, stored_state)
+              Mnesia.abort(err)
+          end
+        end
+      )
+
+      # |> case do
+      #   {:error, _} = err ->
+
+      #   res ->
+      #     res
+      # end
+    end
+
+    Mnesia.transaction(updater)
     |> case do
+      {:atomic, :ok} ->
+        :ok
+
+      {:aborted, reason} ->
+        handle_maybe_update_ks_tr_error(reason)
+    end
+  end
+
+  defp handle_maybe_update_ks_tr_error(reason) do
+    case reason do
+      {:error, _} = err ->
+        err
+
+      _ ->
+        {:error, "failed to update key state in the db: #{reason_to_error(reason)} "}
+    end
+  end
+
+  defp update_ks_error_newer_stored_state(pre, sn, ks, stored_state) do
+    {:error,
+     "AID='#{pre}' has a newer key state stored at sn='#{sn}', stored state '#{inspect(stored_state)}' wanted to update with '#{inspect(ks)}'"}
+  end
+
+  @spec maybe_update_ks(Kerilex.pre(), Watcher.KeyState.t()) ::
+          {:ok, KeyState.t() | nil}
+          | {
+              :not_updated,
+              :equal_state
+              | {:stored_fs_gt, Kerilex.int_sn(), KeyState.iso8601(), KeyState.t()}
+            }
+          | {:error, String.t()}
+  def maybe_update_ks(prefix, %KeyState{} = state) do
+    Mnesia.dirty_read(@ks_table, prefix)
+    |> do_update_ks(prefix, state)
+  catch
+    :exit, {:aborted, reason} ->
+      {:error, "lookup for pref failed, #{reason_to_error(reason)}"}
+  end
+
+  defp do_update_ks(read_res, prefix, %KeyState{se: sn} = state) do
+    case read_res do
       [] ->
         update_ks(prefix, sn, state)
 
@@ -166,29 +233,23 @@ defmodule Watcher.KeyStateStore do
           stored_sn < sn ->
             update_ks(prefix, sn, state, prev_state)
 
-          stored_sn == sn ->
+          # could be a recovery
+          stored_sn >= sn ->
             update_ks_if_newer(prefix, sn, state, prev_state)
-
-          # important for superceeding recovery
-          stored_sn > sn ->
-            {:not_updated, {:stored_sn_gt, stored_sn, prev_state}}
         end
     end
-  catch
-    :exit, {:aborted, reason} ->
-      {:error, "lookup for pref failed, #{reason_to_error(reason)}"}
   end
 
   defp update_ks_if_newer(prefix, sn, state, prev_state) do
     cond do
-      prev_state.d == state.d ->
+      prev_state.de == state.de ->
         {:not_updated, :equal_state}
 
       prev_state.fs < state.fs ->
         update_ks(prefix, sn, state, prev_state)
 
       prev_state.fs >= state.fs ->
-        {:not_updated, {:stored_fs_gt, prev_state.fs, prev_state}}
+        {:not_updated, {:stored_fs_gt, sn, prev_state.fs, prev_state}}
     end
   end
 
@@ -197,15 +258,45 @@ defmodule Watcher.KeyStateStore do
       Mnesia.write({@ks_table, prefix, sn, state})
     end
 
-    Mnesia.transaction(updater)
-    |> case do
-      {:atomic, :ok} ->
-        {:ok, prev_state}
+    if :mnesia.is_transaction() do
+      updater.()
+    else
+      Mnesia.transaction(updater)
+      |> case do
+        {:atomic, :ok} ->
+          {:ok, prev_state}
 
-      {:aborted, reason} ->
-        {:error,
-         "failed to write key state record for pref '#{prefix}' at sn '#{sn}', #{reason_to_error(reason)}"}
+        {:aborted, reason} ->
+          {:error,
+           "failed to write key state record for pref '#{prefix}' at sn '#{sn}', #{reason_to_error(reason)}"}
+      end
     end
+  end
+
+  def get_ks(pre) do
+    case Mnesia.dirty_read(@ks_table, pre) do
+      [] ->
+        :not_found
+
+      [{_table, _pre, _sn, ks}] ->
+        if ks.di != false do
+          case get_ks(ks.di) do
+            {:ok, pre_ks_list} ->
+              {:ok, [{pre, ks} | pre_ks_list]}
+
+            :not_found ->
+              {:error, "key state for delegator AID='#{ks.di}' not found."}
+
+            {:error, _} = err ->
+              err
+          end
+        else
+          {:ok, [{pre, ks}]}
+        end
+    end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error, "lookup for AID pref='#{pre}' failed: #{reason_to_error(reason)}"}
   end
 
   @spec update_kel({Kerilex.pre(), integer()}, map()) ::
@@ -453,7 +544,7 @@ defmodule Watcher.KeyStateStore do
         {head_match, guard, [result]}
       end
 
-    do_select = fn  ->
+    do_select = fn ->
       case Mnesia.select(@kel_table, [spec], 1, :read) do
         {[res], _cont} ->
           res
@@ -523,4 +614,6 @@ defmodule Watcher.KeyStateStore do
     |> Mnesia.error_description()
     |> List.to_string()
   end
+
+  defp reason_to_error(reason), do: inspect(reason)
 end

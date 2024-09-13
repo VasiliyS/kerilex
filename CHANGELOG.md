@@ -1,46 +1,44 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
-
-### Added
+## [0.2.1]- 2024-09-11
 
 ### Changed
+- Update `CHANGELOG.md` to follow [`Common Changelog`](https://common-changelog.org)
 
-### Removed
-
-### Security
+### Added
+- Implement key state storage functionality (`get_ks`, `maybe_update_ks`)
+- Verify `opts` passed to `LogsProcessor.process_kel`
 
 ### Fixed
+- Refactor `LogsProcessor.process_kel` for better code readability
+
+[0.2.1]: https://github.com/VasiliyS/kerilex/releases/tag/0.2.1
 
 ## [0.2.0] - 2024-09-04
 
 ### Added
-- Out of Order processing of KELs. Useful for incremental KEL/events processing.
+- Implement "out of order" processing of KELs. Useful for incremental KEL/events processing.
 
-- `LogProcessor.process` now accepts existing key states, which allows it to process KELs incrementally.
+- Add `opts` parameter to `LogProcessor.process_kel` to accept existing key states, which allows it to process KELs incrementally.
 
-- Superseding Rotation recovery handling for `rot` events. 
-The current implementation will delete all events in the KEL that are coming after the recovery events. 
+- Implement Superseding Rotation recovery handling for `rot` events. 
+
+    _Note:_ The current implementation will delete all events in the KEL that are coming after the recovery events. 
 Need to handle `ixn`s that might have "anchors" - either `seal`s of `ACDC` credentials or delegate events (e.g. `drt` and `dip`).
 
-- Tests for `LogsProcessor`
+- Implement tests for `LogsProcessor`
 
 ### Changed
-- `LogsProcessor` now relies on the `KeyStateCache` to ensure the order of the events and reduce amount of database lookups.
-- `%KeyState` has a changed set of fields.
+- Refactor `LogsProcessor` to rely on the `KeyStateCache` to ensure the order of the events and reduce amount of database lookups.
+- Rename `%KeyState` fields and add `last_event`.
 
 ### Fixed
 
-- Older tests
-- Dependency on a local fork of `blake3`.
+- Make older tests work
+- Remove dependency on a local fork of `blake3`.
 
-## [0.1.0] - 2024-08-09
+[0.2.0]: https://github.com/VasiliyS/kerilex/releases/tag/0.2.0
 
-### Added
+## 0.1.0 - 2024-08-09
 
-- The initial release
+ _The initial release_
