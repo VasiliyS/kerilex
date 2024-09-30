@@ -58,7 +58,7 @@ defmodule LogProcessorTest.Helper do
   def init_db_for_test(%{tmp_dir: tmp_dir}) do
     :stopped = :mnesia.stop()
     Application.put_env(:mnesia, :dir, tmp_dir |> String.to_charlist())
-    :ok = KeyStateStore.create_schema()
+    :ok = Watcher.MnesiaHelpers.create_schema()
     :ok = KeyStateStore.init_tables()
   end
 end

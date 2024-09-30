@@ -96,11 +96,11 @@ defmodule Kerilex.Event.Inception do
 
   """)
 
-  @conf_eo :eo
-  @conf_dnd :dnd
-  @conf_nb :nb
-
-  @config_opts %{@conf_dnd => "DND", @conf_eo => "EO", @conf_nb => "NB"}
+  # will be needed for a proper `new` function
+  # @conf_eo :eo
+  # @conf_dnd :dnd
+  # @conf_nb :nb
+  # @config_opts %{@conf_dnd => "DND", @conf_eo => "EO", @conf_nb => "NB"}
 
   def encode(kts, keys, nts, next_key_digs, backers) do
     {:ok, eo} = event_obj(kts, keys, nts, next_key_digs, backers)

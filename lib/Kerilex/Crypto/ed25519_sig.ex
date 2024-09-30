@@ -6,7 +6,6 @@ defmodule Kerilex.Crypto.Ed25519Sig do
   alias Kerilex.Derivation.Basic, as: QB64
   alias Kerilex.Attachment.Number
   alias Kerilex.Crypto.Ed25519, as: Ed
-  import Kerilex.Constants
 
   # defstruct sig: <<>>
   @sig_type Ed.type()
@@ -53,13 +52,6 @@ defmodule Kerilex.Crypto.Ed25519Sig do
     end
   end
 
-  defp do_small_idx_parse(ind, b64_sig, att_rest, sig_container) do
-    with {:ok, idx} <- Number.b64_to_int(ind),
-         sig <- b64_sig |> QB64.decode_qb64_value(1, 1, 88, 0) do
-      sm = {@sig_type, sig}
-      {:ok, struct(sig_container, ind: idx, sig: sm), att_rest}
-    end
-  end
 
   def parse(
         <<"2A", ind::binary-size(2), oind::binary-size(2), b64_sig::binary-size(86),
@@ -79,6 +71,14 @@ defmodule Kerilex.Crypto.Ed25519Sig do
   def parse(<<"0B", b64_sig::binary-size(86), att_rest::bitstring>>, nil) do
     sig = b64_sig |> QB64.decode_qb64_value(1, 1, 88, 0)
     {:ok, {@sig_type, sig}, att_rest}
+  end
+
+  defp do_small_idx_parse(ind, b64_sig, att_rest, sig_container) do
+    with {:ok, idx} <- Number.b64_to_int(ind),
+         sig <- b64_sig |> QB64.decode_qb64_value(1, 1, 88, 0) do
+      sm = {@sig_type, sig}
+      {:ok, struct(sig_container, ind: idx, sig: sm), att_rest}
+    end
   end
 
   def valid?({@sig_type, sig}, data, pk) do

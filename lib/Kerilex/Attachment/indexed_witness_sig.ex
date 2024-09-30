@@ -1,7 +1,11 @@
 defmodule Kerilex.Attachment.IndexedWitnessSig do
-  defstruct sig: nil, ind: nil
 
   alias Kerilex.Attachment.Signature
+
+  @type t() :: %__MODULE__{sig: Signature.t(), ind: non_neg_integer()}
+
+  defstruct sig: nil, ind: nil
+
 
   def new({type, sig_data} = sig, ind)
       when is_atom(type) and

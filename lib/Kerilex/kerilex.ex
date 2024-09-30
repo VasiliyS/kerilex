@@ -25,9 +25,14 @@ defmodule Kerilex do
   @type kel_ilk :: String.t
 
   @typedoc """
-  sequential number of a KEL event, decoded from hex
+  sequence number of a KEL event, decoded from hex
   """
   @type int_sn() :: non_neg_integer()
+
+  @typedoc """
+  sequence number of a KEL event, hex string
+  """
+  @type hex_sn() :: binary()
 
   @typedoc """
   configuration trait of an AID (prefix)
@@ -165,4 +170,13 @@ defmodule Kerilex.Helpers do
   def hex_to_int(value, err_msg) do
     {:error, err_msg <> ", must be an int or a string, got: '#{inspect(value)}'"}
   end
+
+  @spec wrap_error(:error | term(), String.t()) :: term() | {:error, String.t()}
+  def wrap_error(term, msg)
+
+  def wrap_error(:error, msg) do
+    {:error, msg}
+  end
+
+  def wrap_error(term, _), do: term
 end

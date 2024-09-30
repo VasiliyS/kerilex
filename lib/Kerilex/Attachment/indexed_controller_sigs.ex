@@ -36,7 +36,7 @@ defmodule Kerilex.Attachment.IndexedControllerSigs do
         get_signatures(count - 1, att_rest, [sig | sigs])
 
       error ->
-        IO.puts "error getting idx sig at #{count}, cesr '#{att_rest}'"
+        # IO.puts "error getting idx sig at #{count}, cesr '#{att_rest}'"
         error
     end
   end

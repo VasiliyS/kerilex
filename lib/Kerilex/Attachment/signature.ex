@@ -5,10 +5,11 @@ defmodule Kerilex.Attachment.Signature do
   alias Kerilex.Crypto.Ed25519Sig, as: EdSig
   alias Kerilex.Crypto.Ed25519, as: Ed
 
+  @type sig_type :: :ed25519
   @typedoc """
     tuple {sig_type, signature}
   """
-  @type t :: {:ed25519, binary()}
+  @type t :: {sig_type(), binary()}
 
   def parse(<<att::bitstring>>, sig_container) do
     # TODO(VS): handle other signature types

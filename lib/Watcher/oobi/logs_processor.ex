@@ -22,6 +22,7 @@ defmodule Watcher.OOBI.LogsProcessor do
   alias Watcher.KeyStateEvent
   alias Kerilex.Crypto.KeyTally
   alias Kerilex.KELParser
+  alias KELParser.Integrity
   alias Kerilex.Event
 
   alias Watcher.EventEscrow
@@ -41,10 +42,14 @@ defmodule Watcher.OOBI.LogsProcessor do
   @key_states_opt :key_states
   @process_kel_opts [@key_states_opt]
 
-  @spec process_kel(maybe_improper_list(), EventEscrow.t(), keyword()) ::
-    {:ok, EventEscrow.t(), KeyStateCache.t()}
-    | {:error, String.t()}
-    | {:duplicity, {Kerilex.pre(), Kerilex.int_sn(), KeyStateStore.stored_event()},Kerilex.json_binary()}
+  @type process_kel_opt :: {:key_states, [{Kerilex.pre(), KeyState.t()}]}
+  @type process_kel_opts :: [process_kel_opt()] | []
+
+  @spec process_kel([KELParser.parsed_kel_element()], EventEscrow.t(), process_kel_opts()) ::
+          {:ok, EventEscrow.t(), KeyStateCache.t(), non_neg_integer()}
+          | {:error, String.t()}
+          | {:duplicity, {Kerilex.pre(), Kerilex.int_sn(), KeyStateStore.stored_event()},
+             Kerilex.json_binary()}
   @doc """
   Takes:
   - output of `Kerilex.KELParser.parse/1`, verifies each entry and updates the `KeyStateStore` accordingly.
@@ -64,17 +69,17 @@ defmodule Watcher.OOBI.LogsProcessor do
   """
   def process_kel(parsed_kel, escrow, opts \\ [])
       when is_list(parsed_kel) and is_list(opts) do
-    opts = Keyword.validate!(opts,@process_kel_opts)
+    opts = Keyword.validate!(opts, @process_kel_opts)
     ksc = init_key_state_cache(opts)
 
     parsed_kel
     |> Enum.reduce_while(
-      {:ok, escrow, ksc},
+      {:ok, escrow, ksc, 0},
       &process_kel_reducer/2
     )
     |> case do
-      {:ok, _escrow, _key_state} = res ->
-        Logger.debug(%{msg: "finished processing KEL messages", kel_length: length(parsed_kel)})
+      {:ok, _escrow, _key_state, msg_count} = res ->
+        Logger.debug(%{msg: "finished processing KEL messages", kel_length: msg_count})
         res
 
       res ->
@@ -90,7 +95,7 @@ defmodule Watcher.OOBI.LogsProcessor do
     end
   end
 
-  defp process_kel_reducer(msg, {:ok, escrow, key_state}) do
+  defp process_kel_reducer(msg, {:ok, escrow, key_state, msg_count}) do
     case process_kel_msg(msg, key_state) do
       {:ok, said, key_state, res} when said != nil ->
         Logger.debug(Map.put(res, :msg, "added event"))
@@ -99,7 +104,7 @@ defmodule Watcher.OOBI.LogsProcessor do
         |> process_escrow(said, key_state)
         |> case do
           {:ok, escrow, key_state} ->
-            {:cont, {:ok, escrow, key_state}}
+            {:cont, {:ok, escrow, key_state, msg_count + 1}}
 
           {:error, reason} ->
             do_process_kel_err(reason)
@@ -107,7 +112,7 @@ defmodule Watcher.OOBI.LogsProcessor do
 
       {:ok, _said = nil, key_state, res} ->
         Logger.debug(Map.put(res, :msg, "event not added"))
-        {:cont, {:ok, escrow, key_state}}
+        {:cont, {:ok, escrow, key_state, msg_count + 1}}
 
       {:out_of_order, said, event_obj} ->
         pre = event_obj["i"]
@@ -123,7 +128,7 @@ defmodule Watcher.OOBI.LogsProcessor do
           sn: event_obj["s"]
         })
 
-        {:cont, {:ok, escrow, key_state}}
+        {:cont, {:ok, escrow, key_state, msg_count + 1}}
 
       {:error, reason} ->
         do_process_kel_err(reason)
@@ -199,10 +204,10 @@ defmodule Watcher.OOBI.LogsProcessor do
   and updates the persistent KEL.
   Upon success, an updated key state will be returned, if the processed message is an establishment event.
 
-  Returns todo.
   """
   def process_kel_msg(%{} = parsed_msg_map, state_cache) do
-    with {:ok, msg_obj} <- KELParser.check_msg_integrity(parsed_msg_map),
+    with :ok <- Integrity.check_msg_integrity(parsed_msg_map),
+         {:ok, msg_obj} <- KELParser.decode_json(parsed_msg_map),
          :ok <- msg_obj |> Event.check_labels() do
       # basic verification is now done
       # process `rpy` message separately
@@ -212,9 +217,8 @@ defmodule Watcher.OOBI.LogsProcessor do
 
   defp do_process_msg(type, msg_obj, parsed_msg_map, state_cache)
        when type in ~w|icp rot ixn dip drt| do
-    with {:ok, msg_obj, sn} <- normalize_event_sn(msg_obj),
-         :ok <- check_config_and_parent(msg_obj, state_cache) do
-      case check_event_in_state_cache(msg_obj["i"], sn, state_cache) do
+    with :ok <- check_config_and_parent(msg_obj, state_cache) do
+      case check_event_in_state_cache(msg_obj["i"], msg_obj["s"], state_cache) do
         :ok ->
           # at this point we know that this event is allowed and it's parent is already processed
           # and that this event was not processed before
@@ -233,15 +237,22 @@ defmodule Watcher.OOBI.LogsProcessor do
 
   defp do_process_msg("rpy", msg_obj, parsed_msg_map, state_cache) do
     with true <- msg_obj["r"] == "/loc/scheme",
-         :ok <- KELParser.check_sigs_on_stateful_msg(msg_obj, parsed_msg_map),
+         db_key = {msg_obj["a"]["eid"], msg_obj["a"]["scheme"]},
+         url = msg_obj["a"]["url"],
+         :not_found <- KeyStateStore.find_end_point(db_key, url),
+         :ok <- Integrity.check_sigs_on_stateful_msg(msg_obj, parsed_msg_map),
          {:ok, endpoint} <- Endpoint.new(msg_obj) do
-      {msg_obj["a"]["eid"], msg_obj["a"]["scheme"]}
+      db_key
       |> KeyStateStore.maybe_update_backers(endpoint)
       |> handle_update_backers_res(msg_obj, state_cache)
     else
       false ->
         {:ok, nil, state_cache,
-         %{result: "ignored", reason: "unsupported reply route: `#{msg_obj["r"]}`"}}
+         %{result: "ignored", reason: "unsupported reply route: '#{msg_obj["r"]}'"}}
+
+      {:ok, wit_aid, scheme, url} ->
+        {:ok, nil, state_cache,
+         %{result: "ignored", reason: "already exist", eid: wit_aid, scheme: scheme, url: url}}
 
       {:error, _} = err ->
         err
@@ -250,17 +261,6 @@ defmodule Watcher.OOBI.LogsProcessor do
 
   defp do_process_msg(type, msg_obj, _parsed_msg_map, _state_cache) do
     {:error, "unsupported event: type='#{type}' said='#{msg_obj["d"]}'"}
-  end
-
-  defp normalize_event_sn(msg_obj) do
-    case Kerilex.Helpers.hex_to_int(msg_obj["s"], "event's `s` field is not properly encoded") do
-      {:ok, sn} ->
-        msg_obj = update_in(msg_obj["s"], fn _ -> sn end)
-        {:ok, msg_obj, sn}
-
-      err ->
-        err
-    end
   end
 
   defp check_config_and_parent(msg_obj, state_cache) do
@@ -463,7 +463,7 @@ defmodule Watcher.OOBI.LogsProcessor do
   end
 
   defp maybe_store_msg("icp", msg_obj, parsed_msg, state_cache) do
-    with {:ok, sig_th} <- KELParser.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
+    with {:ok, sig_th} <- Integrity.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
          {:ok, icp_event} <- IcpEvent.from_ordered_object(msg_obj),
          {:ok, key_state} <- KeyState.new(icp_event, sig_th, parsed_msg, KeyState.new()) do
       state_cache = state_cache |> KeyStateCache.put_key_state(msg_obj["i"], key_state)
@@ -475,7 +475,7 @@ defmodule Watcher.OOBI.LogsProcessor do
   end
 
   defp maybe_store_msg("dip", msg_obj, parsed_msg, state_cache) do
-    with {:ok, sig_th} <- KELParser.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
+    with {:ok, sig_th} <- Integrity.check_sigs_on_stateful_msg(msg_obj, parsed_msg),
          {:ok, dip_event} <- DipEvent.from_ordered_object(msg_obj),
          {:ok, key_state} <- KeyState.new(dip_event, sig_th, parsed_msg, KeyState.new()),
          {:ok, [ssc]} <- KELParser.get_source_seal_couples(parsed_msg),
@@ -536,7 +536,7 @@ defmodule Watcher.OOBI.LogsProcessor do
          :ok <-
            check_key_state_found(prev_state, pref, rot_event["t"], rot_event["d"]),
          {:ok, key_state} <- KeyState.new(rot_event, sig_th, parsed_msg, prev_state),
-         :ok <- KELParser.check_sigs_on_rot_msg(rot_event, key_state.b, parsed_msg) do
+         :ok <- Integrity.check_sigs_on_rot_msg(rot_event, key_state.b, parsed_msg) do
       state_cache = state_cache |> KeyStateCache.put_key_state(pref, key_state)
 
       {pref, rot_event["s"]}

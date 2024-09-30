@@ -4,7 +4,7 @@ defmodule Kerilex.MixProject do
   def project do
     [
       app: :kerilex,
-      version: "0.2.1",
+      version: "0.3.0",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -34,9 +34,12 @@ defmodule Kerilex.MixProject do
       {:enacl, git: "https://github.com/aeternity/enacl.git"},
       {:jason, "~> 1.4"},
       {:ratio, "~> 4.0"},
-      {:finch, "~> 0.18"},
+      {:finch, "~> 0.19.0"},
+      {:req, "~> 0.5"},
       {:event_bus, "~> 1.7"},
-      {:nanoid, "~> 2.1"},
+      {:gen_stage, "~> 1.2"},
+      {:poolex, "~> 1.0"},
+      # {:nanoid, "~> 2.1"},
       #{:mint, "~> 1.6"},
       {:benchee, "~> 1.3", only: :dev}
     ]

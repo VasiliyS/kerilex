@@ -8,6 +8,8 @@ defmodule Kerilex.Attachment.ReplayCouple do
   alias Kerilex.Attachment.Number
   alias Kerilex.DateTime, as: KDT
 
+  @type t() :: {Kerilex.int_sn(), DateTime.t()}
+
   # defstruct fsn: nil, dt: nil
 
   def parse(<<att::bitstring>>) do

@@ -1,0 +1,157 @@
+specification {
+    element component
+    element extLibComponent {
+        style {
+            border dashed
+            color muted
+        }
+    }
+    element ETSTable {
+        style {
+            shape cylinder
+            icon tech:erlang
+        }
+        technology "[ETS]"
+    }
+    element mnesiaTable {
+        style {
+            shape cylinder
+            icon tech:erlang
+        }
+        technology "[mnesia]"
+    }
+    element container
+    element system
+    relationship notifies {
+        line dotted
+        color secondary
+    }
+    relationship sync {
+        line solid
+    }
+    relationship async {
+        line dotted
+        head onormal
+        tail onormal
+    }
+    relationship callback {
+        line dotted
+        color green
+    }
+    relationship supervises {
+        line dotted
+        color amber
+        head onormal
+    }
+}
+
+model {
+    system WitnessPool "KERI Witness Pool" {
+        description "a number of KERI Witnesses used by an AID"
+        container witness1 "KERI Witness"
+        container witnessN "KERI Witness"
+    }
+    watcher = container "Watcher" {
+        technology "Elixir"
+        -> WitnessPool "retrieves KEL events and tracks key state changes"
+        component aidmonitor "AIDMonitor" {
+            -> AIDList "Manages list of monitored AIDs and parameters of monitoring"
+            -> OOBIResolver "Gets KEL for a new AID using OOBI url"
+            -> OOBILogsProcessor "process OOBI response"
+        }
+        mnesiaTable AIDList {
+            description "
+            AIDs that are being watched. 
+            Includes monitoring parameters
+            "
+        }
+        component ObservationScheduler {
+            description "
+                maintains the list  of AIDs which are due to be checked
+                for new key state
+            "
+            technology "[GenStage Producer]"
+            -> AIDList "retrives monitoring parameters"
+        }
+        component KeyStateObserver {
+            description "
+            gets the latest key state of an AID from its witnesses
+            and initiates KEL sync
+            "
+            technology "[GenStage ConsumerSupervisor]"
+            -> ObservationScheduler "asks for AID"
+            -> KeyStateObserverWorker "starts and sends observation job"
+        }
+        component KeyStateObserverWorker "KeyStateObserver.Worker" {
+            technology "[Task]"
+            -> OOBIResolver "requests KEL for an AID"
+            -> KeyStateUpdaterWorker "provides parsed KEL"
+            -> KeyStateUpdaterPool "gets a free KeyStateUpdate.Worker"
+            -> KerilexKELParser "uses to parse received KEL"
+            component filterFunction {
+                -> KeyStateStore "find existing KEL events"
+            }
+        }
+        
+        extLibComponent KerilexKELParser "Kerilex.KELParser" {
+            description "KERI Key Event Log Parser"
+            -[callback]-> KeyStateObserverWorker.filterFunction "filters existing KEL Events"
+        }
+        component OOBIResolver "OOBI.Resolver"{
+            description "
+            - gets KEL log for OOBI introduction    
+            - gets KEL log for new incremental key state update
+            "
+            -[sync]-> WitnessPool "retreives KEL using OOBI endpoint"
+            -> KeyStateStore "gets endpoint info for witnesses"
+        }
+        component KeyStateUpdaterPool "KeyStateUpdater.Pool" {
+            -[supervises]-> KeyStateUpdaterWorker "maintains a pool of"
+        }
+        component KeyStateUpdaterWorker "KeyStateUpdater.Worker"{
+            technology "[GenServer]"
+            -> OOBILogsProcessor "calculates new key state"
+            -> KeyStateStore "update key state"
+        }
+        component OOBILogsProcessor "OOBI.LogsProcessor" {
+            -> KeyStateStore "updates KEL events and stores endpoint data"
+        }
+        mnesiaTable KeyStateStore
+
+
+    }
+
+}
+
+views {
+    view index {
+        include *
+        style watcher {
+            icon tech:elixir
+        }
+        style WitnessPool {
+            color secondary
+        }
+    }
+
+    view of WitnessPool {
+        include *
+        style * {
+            color muted
+            shape cylinder
+        }
+    }
+
+    view of watcher {
+        include *
+        include KeyStateObserverWorker.*
+        style WitnessPool {
+            color muted
+        }
+    
+      autoLayout TopBottom
+      style KeyStateObserverWorker {
+        opacity 31%
+      }
+    }
+}

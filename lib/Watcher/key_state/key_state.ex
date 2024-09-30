@@ -6,6 +6,7 @@ defmodule Watcher.KeyState do
   alias Kerilex.Crypto.{KeyTally, WeightedKeyThreshold, KeyThreshold}
   alias Watcher.KeyState.{IcpEvent, RotEvent, DipEvent, DrtEvent}
   alias Kerilex.Event
+  alias Kerilex.KELParser.Integrity
   import Comment
 
   comment("""
@@ -160,50 +161,9 @@ defmodule Watcher.KeyState do
   end
 
   defp check_idx_sigs(ks, serd_msg, idx_sigs, key) do
-    with {:ok, verkey_lst} <- Map.fetch(ks, key) do
-      verkey_lst |> validate_idx_sigs(idx_sigs, serd_msg)
-    end
+    Map.fetch!(ks, key) |> Integrity.validate_idx_sigs(idx_sigs, serd_msg)
+  rescue
+    _ ->
+      {:error, "key : '#{inspect(key)}' not found in the KeyState"}
   end
-
-  defp validate_idx_sigs([], _idx_sigs, _data), do: {:error, "msg has an empty key list"}
-
-  defp validate_idx_sigs(key_lst, idx_sigs, data) do
-    nok = length(key_lst)
-
-    idx_sigs
-    |> Enum.reduce_while(
-      _acc = {:ok, []},
-      fn sig, {:ok, indices} ->
-        validate_idx_sig(nok, key_lst, sig, data)
-        |> case do
-          :ok ->
-            %{ind: sind} = sig
-            {:cont, {:ok, [sind | indices]}}
-
-          error ->
-            {:halt, error}
-        end
-      end
-    )
-  end
-
-  alias Kerilex.Attachment.Signature, as: Sig
-
-  defp validate_idx_sig(no_keys, key_lst, %{sig: sig, ind: sind}, data) do
-    if sind > no_keys do
-      {:error, "sig ind error: got: #{sind}, total keys: #{no_keys}"}
-    else
-      key_qb64 = key_lst |> Enum.at(sind)
-      Sig.check_with_qb64key(sig, data, key_qb64)
-    end
-  end
-
-  # @compile {:inline, wrap_error: 2}
-  # defp wrap_error(term, msg)
-
-  # defp wrap_error(:error, msg) do
-  #   {:error, msg}
-  # end
-
-  # defp wrap_error(term, _), do: term
 end

@@ -1,6 +1,23 @@
 # Changelog
+## [0.3.0] - 2024-09-30
 
-## [0.2.1]- 2024-09-11
+### Changed 
+- Move signature and `SAID` verification functions from `Kerilex.KELParser` to `Kerilex.KELParser.Integrity` module
+- Check existence of `rpy` endpoint messages based on `url` and not on its `d` field.
+
+### Added
+- Implement "Watcher" functionality. 
+    - `AIDMonitor` adds new `AID`s to the monitoring list, based on an `OOBI` `iurl`
+    - `AIDMonitor.MasterSupervisor` starts process tree to request new KEL and update `KeyStateStore` with new events and `KeyState`
+    
+- Document "Watcher" design using `C4`-like notation
+
+- Implement "did:webs" did document generation functionality
+    - `DidWebsProducer` generates `JSON`-encoded did:webs document based on `KeyState`
+
+[0.3.0]: https://github.com/VasiliyS/kerilex/releases/tag/0.3.0
+
+## [0.2.1] - 2024-09-11
 
 ### Changed
 - Update `CHANGELOG.md` to follow [`Common Changelog`](https://common-changelog.org)
@@ -11,8 +28,6 @@
 
 ### Fixed
 - Refactor `LogsProcessor.process_kel` for better code readability
-
-[0.2.1]: https://github.com/VasiliyS/kerilex/releases/tag/0.2.1
 
 ## [0.2.0] - 2024-09-04
 

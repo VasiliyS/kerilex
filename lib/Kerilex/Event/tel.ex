@@ -4,10 +4,7 @@ defmodule Kerilex.Event.Tel do
     - vcp
   """
 
-  import Kerilex.Constants
-  import Comment
   alias Kerilex.Event
-  alias Jason.OrderedObject, as: OO
   alias Kerilex.Crypto
 
   def vcp(issuer_pre, conf \\ []) do

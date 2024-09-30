@@ -5,6 +5,7 @@ defmodule Watcher.KeyStateStore do
   * KSN (latest Key State for a prefix)
   * KEL - key event log for a prefix
   """
+  alias Watcher.MnesiaHelpers
   alias Watcher.KeyStateCache
   alias Jason.OrderedObject
   alias Watcher.KeyStateEvent, as: KSE
@@ -25,43 +26,8 @@ defmodule Watcher.KeyStateStore do
   @kel_table :kel
   # @anchors_table :anchors
 
-  def create_schema(nodes \\ [node()]) do
-    case :mnesia.system_info(:running_db_nodes) do
-      [] ->
-        Mnesia.create_schema(nodes)
-        |> case do
-          {:error, {_node, {:already_exists, node}}} ->
-            {:ok, :already_exists, node}
-
-          {:error, reason} ->
-            {:error, "failed to create db schema, '#{reason_to_error(reason)}'"}
-
-          res ->
-            res
-        end
-
-      db_nodes ->
-        msg = "cannot create schema, db is running on nodes: '#{inspect(db_nodes)}'"
-        {:error, msg}
-    end
-  end
-
-  def start_db() do
-    Mnesia.start()
-    |> case do
-      :ok ->
-        Mnesia.wait_for_tables([@ks_table, @backers_table, @kel_table], 10_000)
-        |> case do
-          {:timeout, remaining_tables} ->
-            {:error, "timeout loading db tables: #{inspect(remaining_tables)}"}
-
-          res ->
-            res
-        end
-
-      {:error, reason} ->
-        {:error, "could not start db, '#{reason_to_error(reason)}'"}
-    end
+  def check_readiness() do
+    MnesiaHelpers.wait_for_tables([@ks_table, @backers_table, @kel_table], timeout: 10_000)
   end
 
   def init_tables(nodes \\ [node()]) do
@@ -73,10 +39,10 @@ defmodule Watcher.KeyStateStore do
              :created <- init_event_log_table(nodes) do
           :ok
         end
+
+      err ->
+        err
     end
-  catch
-    :exit, {:error, reason} ->
-      {:error, "could not start db, '#{reason_to_error(reason)}'"}
   end
 
   defp init_ks_table(nodes) do
@@ -97,7 +63,7 @@ defmodule Watcher.KeyStateStore do
       [
         {@persistence_mode, nodes},
         type: :set,
-        attributes: ~w[prefix_scheme endpoint]a
+        attributes: ~w[prefix_scheme introduced endpoint]a
       ]
     )
     |> handle_create_table_res(@backers_table)
@@ -129,7 +95,7 @@ defmodule Watcher.KeyStateStore do
   #   |> handle_create_table_res(@kel_table)
   # end
 
-  defp handle_create_table_res(res, table) do
+  defp handle_create_table_res(res, _table) do
     res
     |> case do
       {:atomic, :ok} ->
@@ -142,9 +108,6 @@ defmodule Watcher.KeyStateStore do
       {:aborted, reason} ->
         {:error, reason}
     end
-  catch
-    :exit, {:aborted, reason} ->
-      {:error, "failed to create table '#{inspect(table)}', #{reason_to_error(reason)}"}
   end
 
   ########################   data manipulation and access functions #####################################
@@ -173,13 +136,6 @@ defmodule Watcher.KeyStateStore do
           end
         end
       )
-
-      # |> case do
-      #   {:error, _} = err ->
-
-      #   res ->
-      #     res
-      # end
     end
 
     Mnesia.transaction(updater)
@@ -203,12 +159,14 @@ defmodule Watcher.KeyStateStore do
   end
 
   defp update_ks_error_newer_stored_state(pre, sn, ks, stored_state) do
-    {:error,
-     "AID='#{pre}' has a newer key state stored at sn='#{sn}', stored state '#{inspect(stored_state)}' wanted to update with '#{inspect(ks)}'"}
+    msg = ~s(
+     AID='#{pre}' has a newer key state stored at sn='#{sn}', stored state '#{inspect(stored_state)}'
+     wanted to update with '#{inspect(ks)}')
+    {:error, msg}
   end
 
   @spec maybe_update_ks(Kerilex.pre(), Watcher.KeyState.t()) ::
-          {:ok, KeyState.t() | nil}
+          {:ok, KeyState.t()}
           | {
               :not_updated,
               :equal_state
@@ -259,7 +217,8 @@ defmodule Watcher.KeyStateStore do
     end
 
     if :mnesia.is_transaction() do
-      updater.()
+      :ok = updater.()
+      {:ok, prev_state}
     else
       Mnesia.transaction(updater)
       |> case do
@@ -338,6 +297,26 @@ defmodule Watcher.KeyStateStore do
        "failed to find parent event for pref '#{pref}' at sn '#{sn}', #{reason_to_error(reason)}"}
   end
 
+  @spec has_event?(Kerilex.pre(), Kerilex.int_sn(), Kerilex.said()) ::
+          boolean() | {:error, String.t()}
+  def has_event?(pre, sn, said) do
+    head_match = {@kel_table, {pre, sn}, %{"d" => said}}
+    guard = []
+    result = {:const, true}
+
+    Mnesia.dirty_select(@kel_table, [{head_match, guard, [result]}])
+    |> case do
+      [true] ->
+        true
+
+      [] ->
+        false
+    end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error, "db lookup failed, #{reason_to_error(reason)}"}
+  end
+
   @spec check_parent(Kerilex.pre(), non_neg_integer(), Jason.OrderedObject.t()) ::
           {:no_parent_event, Kerilex.said()} | :ok | {:error, String.t()}
   @doc """
@@ -396,7 +375,7 @@ defmodule Watcher.KeyStateStore do
       [] ->
         update_backers(key, endpoint)
 
-      [{_table, _key, o_endpoint}] ->
+      [{_table, _key, _introduced, o_endpoint}] ->
         if endpoint |> KSE.bada_check?(o_endpoint) do
           update_backers(key, endpoint)
         else
@@ -410,7 +389,7 @@ defmodule Watcher.KeyStateStore do
 
   defp update_backers(key, endpoint) do
     updater = fn ->
-      Mnesia.write({@backers_table, key, endpoint})
+      Mnesia.write({@backers_table, key, false, endpoint})
     end
 
     Mnesia.transaction(updater)
@@ -424,14 +403,14 @@ defmodule Watcher.KeyStateStore do
     end
   end
 
-  def get_backer_url(prefix, opt \\ [scheme: ["http", "https"]]) do
-    Keyword.fetch!(opt, :scheme)
+  def get_backer_url(prefix, opts \\ [scheme: ["http", "https"]]) do
+    Keyword.fetch!(opts, :scheme)
     |> Enum.reduce_while(
       nil,
       fn s, _acc ->
         case do_get_backer_url({prefix, s}) do
-          {:ok, url} ->
-            {:halt, {:ok, url}}
+          {:ok, _url, _introduced} = res ->
+            {:halt, res}
 
           :not_found ->
             {:cont, :not_found}
@@ -449,13 +428,50 @@ defmodule Watcher.KeyStateStore do
       [] ->
         :not_found
 
-      [{_table, _key, %Endpoint{URL: url}}] ->
-        {:ok, url}
+      [{_table, _key, introduced, %Endpoint{URL: url}}] ->
+        {:ok, url, introduced}
     end
   catch
     :exit, {:aborted, reason} ->
       {:error,
        "failed to read endpoint record for pref '#{key |> elem(0)}', #{reason_to_error(reason)}"}
+  end
+
+  def set_backer_introduced({pre, scheme} = key) do
+    transactor = fn ->
+      Mnesia.read(@backers_table, key)
+      |> case do
+        [] ->
+          Mnesia.abort(
+            {:not_found, "requested witness pre='#{pre}' scheme='#{scheme}' not found"}
+          )
+
+        [{_table, _key, introduced, end_point}] ->
+          if introduced == true do
+            Mnesia.abort(:ok)
+          else
+            Mnesia.write({@backers_table, key, true, end_point})
+          end
+      end
+    end
+
+    Mnesia.transaction(transactor) |> handle_transaction_res()
+  end
+
+  def find_end_point({wit_aid, scheme}, url) do
+    head_match = {@backers_table, {wit_aid, scheme}, :_, %{URL: url} }
+
+    Mnesia.dirty_match_object(head_match)
+    |> case do
+      [_record] ->
+        {:ok, wit_aid, scheme, url}
+
+      [] ->
+        :not_found
+    end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error, "db lookup failed, #{reason_to_error(reason)}"}
   end
 
   @doc """
@@ -498,8 +514,16 @@ defmodule Watcher.KeyStateStore do
 
   defp handle_transaction_res(res) do
     case res do
-      {:atomic, res} -> res
-      {:aborted, reason} -> reason
+      {:atomic, res} ->
+        res
+
+      {:aborted, reason} when is_tuple(reason) and elem(reason, 0) == :error ->
+        # an error tuple returned from a transaction
+        reason
+
+      {:aborted, reason} ->
+        # dealing with an mnesia error
+        {:error, reason_to_error(reason)}
     end
   end
 

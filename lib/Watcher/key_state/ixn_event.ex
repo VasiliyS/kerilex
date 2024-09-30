@@ -5,8 +5,9 @@ defmodule Watcher.KeyState.IxnEvent do
 
   import Kerilex.Constants
   import Comment
+  import Kerilex.Helpers, only: [wrap_error: 2]
 
-  alias Kerilex.KELParser
+  alias Kerilex.KELParser.Integrity
   alias Jason.OrderedObject, as: OO
   alias Kerilex.Attachment, as: Att
   alias Watcher.KeyStateEvent, as: KSE
@@ -86,7 +87,7 @@ defmodule Watcher.KeyState.IxnEvent do
            parsed_msg
            |> Map.fetch(Att.idx_wit_sigs())
            |> wrap_error("missing witness signatures"),
-         {:ok, b_indices} <- KELParser.check_backer_sigs(serd_msg, wit_sigs, key_state.b),
+         {:ok, b_indices} <- Integrity.check_backer_sigs(serd_msg, wit_sigs, key_state.b),
          :ok <- KeyState.check_backer_threshold(key_state, b_indices),
          {:ok, ctrl_sigs} <-
            parsed_msg
@@ -97,12 +98,4 @@ defmodule Watcher.KeyState.IxnEvent do
     end
   end
 
-  @compile {:inline, wrap_error: 2}
-  defp wrap_error(term, msg)
-
-  defp wrap_error(:error, msg) do
-    {:error, msg}
-  end
-
-  defp wrap_error(term, _), do: term
 end

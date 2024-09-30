@@ -3,26 +3,182 @@ defmodule Kerilex.KELParser do
     parser functions for a KERI KEL data
   """
 
-  alias Kerilex.Attachment, as: Att
-  alias Jason.OrderedObject, as: OO
+  alias Kerilex.Attachment
 
-  def parse(kel) do
-    extract_messages(kel, [])
-  end
+  alias Kerilex.Attachment.{
+    IndexedWitnessSig,
+    IndexedControllerSig,
+    SealSourceCouple,
+    ReplayCouple,
+    NonTransReceiptCouple
+  }
 
-  defp extract_messages(<<>>, msgs) do
-    msgs |> Enum.reverse()
-  end
+  import Kerilex.Helpers
 
-  defp extract_messages(kel, msgs) do
-    with {:keri_msg, size} <- sniff_type(kel),
-         {:ok, msg, rest_kel} <- extract_message(kel, size),
-         {:ok, msg, rest_kel} <- extract_and_parse_att(rest_kel, msg) do
-      extract_messages(rest_kel, [msg | msgs])
+  @event_or_rpy_re ~r/\G"t":"(?<t>.{3})","d":"(?<d>.{44})"(,"i":"(?<i>.{44})","s":"(?<s>.*?)")?/
+  @keri_10_json_start ~S|{"v":"KERI10JSON|
+  @keri_10_json_header @keri_10_json_start <> ~S|xxxxxx_",|
+  # KERI10JSON<hex size>, the length of the <hex size> part, bytes
+  @keri_10_json_size_length 6
+  @re_start_offset byte_size(@keri_10_json_header)
+
+  @type parsed_kel_event :: %{
+          :serd_msg => Kerilex.json_binary(),
+          :idx_wit_sigs => [IndexedWitnessSig.t()] | nil,
+          :idx_ctrl_sigs => [IndexedControllerSig.t()] | nil,
+          :fs_repl_couples => [ReplayCouple.t()] | nil,
+          optional(:seal_src_couples) => [SealSourceCouple.t()]
+        }
+
+  @type parsed_rpy_msg :: %{
+          serd_msg: Kerilex.json_binary(),
+          nt_rcpt_couples: [NonTransReceiptCouple.t()] | nil
+        }
+
+  @type parsed_kel_element :: parsed_kel_event() | parsed_rpy_msg()
+  @type filter_fn :: (Kerilex.kel_ilk(), Kerilex.said(), Kerilex.pre(), Kerilex.hex_sn() ->
+                        :skip | :cont | {:halt, {:error, String.t}})
+
+  @type option() :: {:filter_fn, filter_fn()}
+  @type options() :: [option()]
+
+  @spec new_parsed_key_event(Kerilex.json_binary()) :: parsed_kel_event()
+  def new_parsed_key_event(serd_msg),
+    do: %{serd_msg: serd_msg, idx_wit_sigs: nil, idx_ctrl_sigs: nil, fs_repl_couples: nil}
+
+  @spec new_parsed_rpy_msg(Kerilex.json_binary()) :: parsed_rpy_msg()
+  def new_parsed_rpy_msg(serd_msg), do: %{serd_msg: serd_msg, nt_rcpt_couples: nil}
+
+  @doc """
+  parses KERI KERL, such as a response from an `OOBI` endpoint
+
+  takes optional `:filter_fn` option, a function that takes `type`, `said`, AID `prefix`, hex encoded `sn` and returns either `:cont` or `:skip`
+
+  """
+  @spec parse(bitstring(), options()) :: list(parsed_kel_element()) | {:error, String.t()}
+  def parse(kel, opts \\ []) do
+    filter_fn = Keyword.get(opts, :filter_fn)
+
+    if filter_fn do
+      extract_messages(kel, [], filter_fn)
+    else
+      extract_messages(kel, [])
     end
   end
 
-  defp sniff_type(<<(~S|{"v":"KERI10JSON|), hex_size::binary-size(6), _::bitstring>>) do
+  defp extract_messages(<<>>, parsed_elements) do
+    parsed_elements |> Enum.reverse()
+  end
+
+  defp extract_messages(kel, parsed_elements) do
+    with {:keri_msg, size} <- sniff_type(kel),
+         {:ok, msg, rest_kel} <- extract_message(kel, size),
+         {:ok, parsed_kel_element} <- init_parsed_kel_element(msg),
+         {:ok, parsed_kel_element, rest_kel} <-
+           extract_and_parse_att(rest_kel, parsed_kel_element) do
+      extract_messages(rest_kel, [parsed_kel_element | parsed_elements])
+    else
+      {:keri_att, code} ->
+        {:error, "expected a KERI JSON message, got CESR code: '#{code}'"}
+
+      err ->
+        err
+    end
+  end
+
+  defp extract_messages(<<>>, parsed_elements, _filter_fn) do
+    parsed_elements |> Enum.reverse()
+  end
+
+  defp extract_messages(kel, parsed_elements, filter_fn) do
+    with {:keri_msg, size} <- sniff_type(kel),
+         {:ok, msg, rest_kel} <- extract_message(kel, size),
+         {:ok, parsed_kel_element} <- init_parsed_kel_element(msg),
+         {:ok, t, d, i, s} <- get_msg_data(parsed_kel_element) do
+      continue_extract_messages(
+        filter_fn.(t, d, i, s),
+        parsed_kel_element,
+        parsed_elements,
+        rest_kel,
+        filter_fn
+      )
+    else
+      {:keri_att, code} ->
+        {:error, "expected a KERI JSON message, got CESR code: '#{code}'"}
+
+      err ->
+        err
+    end
+  end
+
+  @compile {:inline, get_msg_data: 1}
+  defp get_msg_data(%{serd_msg: json}) do
+    case Regex.run(@event_or_rpy_re, json, offset: @re_start_offset, capture: [:t, :d, :i, :s]) do
+      [t, d, i, s] ->
+        {:ok, t, d, i, s}
+
+      nil ->
+        {:error, "bad KERI event or message format"}
+    end
+  end
+
+  @compile {:inline, get_msg_type: 1}
+  defp get_msg_type(json) do
+    case json do
+      <<_head::binary-size(@re_start_offset), ~S|"t":"|, type::binary-size(3), _::bitstring>> ->
+        {:ok, type}
+
+      _ ->
+        {:error, "bad KERI event or msg format"}
+    end
+  end
+
+  defp continue_extract_messages(:cont, msg, msgs, rest_kel, filter_fn) do
+    case extract_and_parse_att(rest_kel, msg) do
+      {:ok, msg, rest_kel} ->
+        extract_messages(rest_kel, [msg | msgs], filter_fn)
+
+      err ->
+        err
+    end
+  end
+
+  defp continue_extract_messages(:skip, _msg, msgs, rest_kel, filter_fn) do
+    case skip_att(rest_kel) do
+      {:ok, rest_kel} ->
+        extract_messages(rest_kel, msgs, filter_fn)
+
+      err ->
+        err
+    end
+  end
+
+  defp continue_extract_messages({:halt, err}, _msg, _msgs, _rest_kel, _filter_fn) do
+    err
+  end
+
+
+  defp skip_att(kel) do
+    kel
+    |> Attachment.extract()
+    |> wrap_error("parser error")
+    |> case do
+      {:ok, _att, kel_rest} ->
+        {:ok, kel_rest}
+
+      {:error, reason} ->
+        as =
+          kel
+          |> byte_size()
+          |> min(10)
+
+        {:error, "couldn't parse the attachment: '#{binary_part(kel, 0, as)}...', #{reason}"}
+    end
+  end
+
+  defp sniff_type(
+         <<@keri_10_json_start, hex_size::binary-size(@keri_10_json_size_length), _::bitstring>>
+       ) do
     Integer.parse(hex_size, 16)
     |> case do
       :error ->
@@ -35,20 +191,35 @@ defmodule Kerilex.KELParser do
 
   defp sniff_type(<<"-0", code, _::bitstring>>), do: {:keri_att, code}
   defp sniff_type(<<"-", code, _::bitstring>>), do: {:keri_att, code}
-  # TODO(VS): define unknown type handler
 
+  defp sniff_type(<<head::binary-size(10), _::bitstring>>) do
+    {:error, "encountered unknown encoding: '#{head}...'"}
+  end
+
+  @compile {:inline, extract_message: 2}
   defp extract_message(kel, size) do
-    try do
-      <<msg::binary-size(size), kel_rest::bitstring>> = kel
-      {:ok, %{serd_msg: msg}, kel_rest}
-    rescue
-      MatchError -> {:error, "wrong msg size, want: #{size}, have: #{byte_size(kel)}"}
+    case kel do
+      <<msg::binary-size(size), kel_rest::bitstring>> ->
+        {:ok, msg, kel_rest}
+
+      _ ->
+        {:error, "wrong msg size, want: #{size}, have: #{byte_size(kel)}"}
     end
   end
 
-  def extract_and_parse_att(kel, msg) do
+  @compile {:inline, init_parsed_kel_element: 1}
+  defp init_parsed_kel_element(msg) do
+    with {:ok, type} <- get_msg_type(msg) do
+      case type do
+        "rpy" -> {:ok, new_parsed_rpy_msg(msg)}
+        _ -> {:ok, new_parsed_key_event(msg)}
+      end
+    end
+  end
+
+  defp extract_and_parse_att(kel, msg) do
     kel
-    |> Att.parse()
+    |> Attachment.parse()
     |> wrap_error("parser error")
     |> case do
       {:ok, pa, kel_rest} ->
@@ -65,324 +236,40 @@ defmodule Kerilex.KELParser do
   end
 
   @doc """
-  Parses serialized (json) message from the parser's output (`keri_msg`), validates it's `said`.
-
-  Returns `{error: reason}` or `{:ok, parsed_msg}`. `parsed_msg` is `%Jason.OrderedObject`
+  takes a parsed KEL element and returns decoded JSON where `s` field, if present, was decoded from hex.
   """
-  def check_msg_integrity(%{serd_msg: serd_msg} = _keri_msg) do
-    with {:ok, parsed_msg} <-
-           serd_msg
-           |> Jason.decode(objects: :ordered_objects),
-         :ok <- parsed_msg |> validate_said() do
-      {:ok, parsed_msg}
-    else
-      {:error, reason} ->
-        {:error, "msg integrity check failed: #{reason} "}
-    end
-  end
+  @spec decode_json(parsed_kel_element()) ::
+          {:error, String.t()} | {:ok, Jason.OrderedObject.t()}
+  def decode_json(parsed_kel_element)
 
-  def validate_said(%Jason.OrderedObject{} = pmsg) do
-    with {:ok, type} <-
-           OO.fetch(pmsg, "t")
-           |> wrap_error("msg has no type"),
-         {:ok, dig} <-
-           OO.fetch(pmsg, "d")
-           |> wrap_error("msg has no digest"),
-         {:ok, said} <- type |> get_said(pmsg) do
-      said |> comp_said(dig)
-    else
-      {:error, reason} ->
-        {:error, "said validity check failed: #{reason}"}
-    end
-  end
+  def decode_json(%{serd_msg: json}) do
+    msg_obj = Jason.decode!(json, objects: :ordered_objects)
 
-  defp wrap_error(term, msg)
+    if msg_obj["s"] do
+      case hex_to_int(msg_obj["s"], "event's `s` field is not properly encoded") do
+        {:ok, sn} ->
+          msg_obj = update_in(msg_obj["s"], fn _ -> sn end)
+          {:ok, msg_obj}
 
-  defp wrap_error(:error, msg) do
-    {:error, msg}
-  end
-
-  defp wrap_error(term, _), do: term
-
-  defp comp_said(said, dig) do
-    if said == dig do
-      :ok
-    else
-      {:error, "digest mismatch, wanted: #{dig}, got: #{said}"}
-    end
-  end
-
-  @saidify_labels %{"icp" => ["d", "i"], "dip" => ["d", "i"]}
-
-  @doc """
-      takes a type (e.g. 'icp', 'dip', etc)
-      and calculates said of the KERI message
-  """
-  def get_said(type, %OO{} = pmsg) do
-    @saidify_labels
-    |> Map.fetch(type)
-    |> case do
-      {:ok, ll} ->
-        ll
-
-      _ ->
-        ["d"]
-    end
-    |> saidify(pmsg)
-  end
-
-  @said_placeholder String.duplicate("#", 44)
-
-  defp saidify(ll, pmsg) do
-    ll
-    |> put_placeholders(pmsg)
-    |> case do
-      {:error, _reason} = err ->
-        err
-
-      msg_with_placeholders ->
-        calc_said(msg_with_placeholders)
-    end
-  end
-
-  defp put_placeholders(ll, pmsg) do
-    put_placeholder = fn
-      nil -> :pop
-      val -> {val, @said_placeholder}
-    end
-
-    ll
-    |> Enum.reduce_while(
-      pmsg,
-      fn label, pmsg ->
-        pmsg
-        |> OO.get_and_update(label, put_placeholder)
-        |> case do
-          {nil, _} ->
-            {:halt, {:error, "msg has no '#{label}'"}}
-
-          {_, pmsg} ->
-            {:cont, pmsg}
-        end
+        err ->
+          err
       end
-    )
-  end
-
-  alias Kerilex.Derivation.Basic
-
-  defp calc_said(pmsg) do
-    with {:ok, emsg} <- pmsg |> Jason.encode(),
-         hash = emsg |> Blake3.hash(),
-         {:ok, hash_b64} <- hash |> Basic.to_qb64_blake3_dig() do
-      {:ok, hash_b64}
     else
-      error ->
-        error
+      {:ok, msg_obj}
     end
+  rescue
+    e -> {:error, Exception.message(e)}
   end
+
 
   @doc """
-    returns a list of the source sealcouples
+    returns a list of the source seal couples
   """
   def get_source_seal_couples(%{} = parsed_msg) do
-    Map.fetch(parsed_msg, Att.seal_src_couples())
+    Map.fetch(parsed_msg, Attachment.seal_src_couples())
     |> case do
       {:ok, _} = res -> res
       :error -> {:error, "no source seal couples found"}
-    end
-  end
-
-  @doc """
-   Verifies signatures on parsed messages that have required keys, backers, etc
-   this includes `rpy` and establishment messages (e.g. `icp`, `dip`)
-
-
-   Returns `:ok` or `{:error, reason}`
-  """
-  def check_sigs_on_stateful_msg(msg_obj, %{} = parsed_msg) do
-    if parsed_msg |> Map.has_key?(Att.nt_rcpt_couples()) do
-      check_witness_rcpts(parsed_msg)
-    else
-      msg_obj |> check_all_idx_sigs(parsed_msg)
-    end
-  end
-
-  @doc """
-   Verifies signatures or `rot` and `drt` that depend on state calculations
-
-   Returns `:ok` or `{:error, reason}`
-  """
-  def check_sigs_on_rot_msg(msg_obj, backers, %{serd_msg: serd_msg} = keri_msg) do
-    with {:ok, wit_sigs} <-
-           keri_msg
-           |> Map.fetch(Att.idx_wit_sigs())
-           |> wrap_error("missing witness signatures"),
-         {:ok, b_indices} <- check_backer_sigs(serd_msg, wit_sigs, backers),
-         :ok <- msg_obj |> check_backer_threshold(b_indices),
-         {:ok, ctrl_sigs} <-
-           keri_msg
-           |> Map.fetch(Att.idx_ctrl_sigs())
-           |> wrap_error("missing controller signatures"),
-         {:ok, _c_indices} <- msg_obj |> check_ctrl_sigs(serd_msg, ctrl_sigs) do
-      :ok
-    end
-  end
-
-  # this one is used for `rot` and `drt` messages
-  def check_backer_sigs(serd_msg, wit_sigs, backers) when is_bitstring(serd_msg) do
-    backers
-    |> validate_idx_sigs(wit_sigs, serd_msg)
-    |> case do
-      {:error, reason} ->
-        {:error, "witness signature check failed: " <> reason}
-
-      res ->
-        res
-    end
-  end
-
-  # this one is used for `icp` and `dip` messages
-  def check_backer_sigs(parsed_msg, serd_msg, wit_sigs) when is_bitstring(serd_msg) do
-    check_idx_sigs(parsed_msg, serd_msg, wit_sigs, "b")
-    |> case do
-      {:error, reason} ->
-        {:error, "witness signature check failed: " <> reason}
-
-      res ->
-        res
-    end
-  end
-
-  defp check_witness_rcpts(%{serd_msg: serd_msg} = keri_msg) do
-    keri_msg
-    |> Map.fetch!(Att.nt_rcpt_couples())
-    |> Att.NonTransReceiptCouples.check(serd_msg)
-  end
-
-  defp check_all_idx_sigs(parsed_msg, %{serd_msg: serd_msg} = keri_msg) do
-    with {:ok, wit_sigs} <-
-           keri_msg
-           |> Map.fetch(Att.idx_wit_sigs())
-           |> wrap_error("missing witness signatures"),
-         {:ok, b_indices} <- parsed_msg |> check_backer_sigs(serd_msg, wit_sigs),
-         :ok <- parsed_msg |> check_backer_threshold(b_indices),
-         {:ok, ctrl_sigs} <-
-           keri_msg
-           |> Map.fetch(Att.idx_ctrl_sigs())
-           |> wrap_error("missing controller signatures"),
-         {:ok, c_indices} <- parsed_msg |> check_ctrl_sigs(serd_msg, ctrl_sigs) do
-      parsed_msg |> check_ctrl_threshold(c_indices)
-    end
-  end
-
-  defp check_idx_sigs(parsed_msg, serd_msg, idx_sigs, key) do
-    with {:ok, verkey_lst} <- parsed_msg |> get_list_of(key) do
-      verkey_lst |> validate_idx_sigs(idx_sigs, serd_msg)
-    end
-  end
-
-  defp get_list_of(parsed_msg, key) do
-    parsed_msg[key]
-    # |> OO.fetch(key)
-    |> case do
-      lst when is_list(lst) ->
-        {:ok, lst}
-
-       val when val != nil ->
-        {:error, "expected a list under label '#{key}', got: #{inspect(val)}"}
-
-      nil ->
-        {:error, "msg missing data under key: '#{key}'"}
-    end
-  end
-
-  defp validate_idx_sigs([], _idx_sigs, _data), do: {:error, "msg has an empty key list"}
-
-  defp validate_idx_sigs(key_lst, idx_sigs, data) do
-    nok = length(key_lst)
-
-    idx_sigs
-    |> Enum.reduce_while(
-      _acc = {:ok, []},
-      fn sig, {:ok, indices} ->
-        validate_idx_sig(nok, key_lst, sig, data)
-        |> case do
-          :ok ->
-            %{ind: sind} = sig
-            {:cont, {:ok, [sind | indices]}}
-
-          error ->
-            {:halt, error}
-        end
-      end
-    )
-  end
-
-  alias Kerilex.Attachment.Signature, as: Sig
-
-  defp validate_idx_sig(no_keys, key_lst, %{sig: sig, ind: sind}, data) do
-    if sind > no_keys do
-      {:error, "sig ind error: got: #{sind}, total keys: #{no_keys}"}
-    else
-      key_qb64 = key_lst |> Enum.at(sind)
-      Sig.check_with_qb64key(sig, data, key_qb64)
-    end
-  end
-
-  defp check_ctrl_sigs(parsed_msg, serd_msg, ctrl_sigs) do
-    check_idx_sigs(parsed_msg, serd_msg, ctrl_sigs, "k")
-    |> case do
-      {:error, reason} ->
-        {:error, "controller signature check failed:" <> reason}
-
-      res ->
-        res
-    end
-  end
-
-  ################## threshold validation #######################
-
-  defp check_backer_threshold(event, indices) when is_struct(event, OO) do
-    with {:ok, bt} <-
-           event
-          #  |> IO.inspect(label: "event in check_backer_threshold")
-           |> OO.fetch("bt")
-           |> wrap_error("backer threshold entry ('bt') is missing"),
-         {t, ""} <-
-           bt
-           |> Integer.parse(16)
-           |> wrap_error("can't parse 'bt' as hex int, got: #{inspect(bt)}") do
-      if length(indices) < t do
-        {:error,
-         "number of backers sigs (#{length(indices)}) is lower than the required threshold: #{t}"}
-      else
-        :ok
-      end
-    end
-  end
-
-  defp check_backer_threshold(event, indices) do
-    if length(indices) < event["bt"] do
-      {:error,
-       "number of backers sigs (#{length(indices)}) is lower than the required threshold: #{event["bt"]}"}
-    else
-      :ok
-    end
-  end
-
-  alias Kerilex.Crypto.KeyTally
-
-  defp check_ctrl_threshold(parsed_msg, indices) do
-    with {:ok, kt} <-
-           parsed_msg
-           |> OO.fetch("kt")
-           |> wrap_error("key threshold entry ('kt') is missing"),
-         {:ok, t} <- KeyTally.new(kt) do
-      if t |> KeyTally.satisfy?(indices) do
-        {:ok, t}
-      else
-        {:error, "key threshold: #{kt} wasn't satisfied by sig indices: #{inspect(indices)}"}
-      end
     end
   end
 end

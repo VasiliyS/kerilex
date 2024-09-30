@@ -5,9 +5,10 @@ defmodule Kerilex.Attachment.SealSourceCouple do
       sequence number  + dig
   """
 
-  defstruct seq: nil, dig: nil
-
   alias Kerilex.Attachment.Number
+
+  defstruct seq: nil, dig: nil
+  @type t :: %__MODULE__{seq: Kerilex.int_sn(), dig: Kerilex.said()}
 
   @code "0A"
 
@@ -23,7 +24,7 @@ defmodule Kerilex.Attachment.SealSourceCouple do
     end
   end
 
-  defp parse_fn(<<"0A", sn::binary-size(22), att_rest::bitstring>>) do
+  defp parse_fn(<<@code, sn::binary-size(22), att_rest::bitstring>>) do
     sn
     |> Number.b64_to_int()
     |> case do
