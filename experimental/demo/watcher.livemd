@@ -1,0 +1,183 @@
+# Kerilex Watcher Demo
+
+```elixir
+demo_db_dir = "tmp/db/livebook"
+has_demo_db_dir? = File.exists?(demo_db_dir)
+if !has_demo_db_dir? do 
+  File.mkdir_p!(demo_db_dir)
+else
+  File.rm_rf!(demo_db_dir)
+end
+Application.put_env(:mnesia, :dir, String.to_charlist(demo_db_dir))
+:mnesia.stop()
+:mnesia.create_schema([node()])
+:mnesia.start()
+```
+
+## Setup Watcher DB tables
+
+```elixir
+Watcher.AIDMonitor.Store.init()
+Watcher.KeyStateStore.init_tables()
+```
+
+## Define AIDs to monitor
+
+We'll use the actual production witnesses and `AID`s of the vLEI ecosystem.
+
+All `AID`s of **Global Legal Entity Identifier Foundaiton** [GLEIF](https://www.gleif.org/en/vlei/introducing-the-verifiable-lei-vlei)
+
+And one of its **Qualified vLEI Issuers** (aka QVI), [Provenant](https://provenant.net/vlei-credentials.html)
+
+```elixir
+alias Watcher.AIDMonitor
+alias Watcher.AIDMonitor.ObservationParams
+
+gleif_root_aid = "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2"
+gleif_root_oobi = "http://5.161.69.25:5623/oobi/#{gleif_root_aid}/witness"
+
+gleif_gida_aid = "EFcrtYzHx11TElxDmEDx355zm7nJhbmdcIluw7UMbUIL"
+gleif_gida_oobi = "http://13.244.119.106:5623/oobi/#{gleif_gida_aid}/witness"
+
+gleif_geda_aid = "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS"
+gleif_geda_oobi = "http://65.21.253.212:5623/oobi/#{gleif_geda_aid}/witness"
+
+provenant_qvi_aid = "ED88Jn6CnWpNbSYz6vp9DOSpJH2_Di5MSwWTf1l34JJm"
+provenant_qvi_oobi = "http://witness1.main.provenant.net:5631/oobi/#{provenant_qvi_aid}/witness"
+
+
+```
+
+`AIDMonitor` uses `Watcher.AIDMonitor.ObservationParams` struct to determine its configuration. 
+Currently, only the monitoring interval, in seconds, is supported.
+
+```elixir
+params_1_mins = %ObservationParams{interval: 60}
+```
+
+## Add GLEIF AIDs to the monitoring list
+
+`AIDMonitor.introduce_aid` function will get the current `KEL` using the provided `OOBI` URL, parse the output and store initial key state for the given `AID`. If all went well, then the `AID` will be added to the list of monitored indentities and it's state will be polled and updated every `x` seconds, as specified in the `ObservationParams` struct.
+
+```elixir
+AIDMonitor.introduce_aid(gleif_root_oobi, params_1_mins)
+AIDMonitor.introduce_aid(gleif_gida_oobi, params_1_mins)
+AIDMonitor.introduce_aid(gleif_geda_oobi, params_1_mins)
+AIDMonitor.introduce_aid(provenant_qvi_oobi, params_1_mins)
+```
+
+### Calculated Key States
+
+<!-- livebook:{"break_markdown":true} -->
+
+Let's take a look at the resulting key state for GLEIF's root `AID`:
+
+```elixir
+Watcher.KeyStateStore.get_state(gleif_root_aid)
+```
+
+### Getting Related Key States
+
+<!-- livebook:{"break_markdown":true} -->
+
+Some `AID`s depend on the state of their so called 'delegator'. For example, GLEIF's GEDA (GLEIF External Delegated AID) is a 'delegate' of GLEIF's root `AID`.
+
+To see all related states, use `KeyStateStore.collect_key_state` function.
+It'll return a list of tuples, `{"aid prefix", %KeyState{}}`, representing the latest key state of the 'delegators' (there can be more than one) as well as the that of the 'delagate'
+
+```elixir
+Watcher.KeyStateStore.collect_key_state(gleif_geda_aid)
+```
+
+## Start the watcher process
+
+To monitor "introduced" `AID`s on a regular basis, start `MasterSupervisor`:
+
+```elixir
+{:ok, watcher_pid} = AIDMonitor.MasterSupervisor.start_link([])
+```
+
+## Experimenting with AIDs
+
+Let's try to see what happens when a new event (for example `rot`) is perfomed on a monitored `AID`
+
+<!-- livebook:{"break_markdown":true} -->
+
+> #### Tip
+> 
+> For this example to work, please start `keripy` on this computer.
+> 
+> You'll need v1.1* _tag_ e.g. [v.1.19](https://github.com/WebOfTrust/keripy/tree/1.1.19).
+> 
+> The easiest is to start a docker container - one  session with `kli witness demo` and in a different session (e.g. using `docker exec -it <container id> /bin/bash`) use script  `script/demo/basic/delegate.sh` to create the demo `AID`s.
+> 
+> _**Note**_:
+> 
+> you'll need to `source scripts/demo/demo_scripts.sh` first, in order for `delegate.sh` and other demo scripts to work!
+> 
+> Also, don't forget to expose ports (5642 - 5644)
+
+```elixir
+keripy_demo_external_aid = "EHOuGiHMxJShXHgSb6k_9pqxmRb8H-LT0R2hQouHp8pW"
+keripy_demo_external_oobi = "http://127.0.0.1:5642/oobi/#{keripy_demo_external_aid}/witness"
+params_10_sec = %ObservationParams{interval: 10}
+```
+
+```elixir
+AIDMonitor.introduce_aid(keripy_demo_external_oobi, params_10_sec)
+```
+
+```elixir
+Watcher.KeyStateStore.get_state(keripy_demo_external_aid)
+```
+
+rotate "external" AID
+
+```bash
+kli rotate -n external -a external
+```
+
+check status
+
+```bash
+kli status -n external
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+Verify that the new state has been picked-up
+
+> `kli` output will list the current public key and sequence number (the latest event number).
+> 
+> You can compare this with the output of the `get_state` below.
+> 
+> Fields `k` and `last_event: {<event type>, <seq no>, <digest>}`
+
+```elixir
+{:ok, external_aid_state, external_state_sn} = Watcher.KeyStateStore.get_state(keripy_demo_external_aid)
+```
+
+## Generating DID:WEBS did document
+
+The Library also supports generation of a `did:webs` compliant did document.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Using an `AID` generated by the locally installed `keripy`, we coud do:
+
+```elixir
+base_url = "http://example.com"
+{:ok, did_doc_example} = Watcher.DidWebsProducer.did_document(keripy_demo_external_aid, external_aid_state, base_url: base_url)
+```
+
+Let's print it out:
+
+```elixir
+did_doc_example |> Jason.decode!(objects: :ordered_objects) |> Jason.encode!(pretty: true) |> IO.puts
+```
+
+### Stop Watcher Process
+
+```elixir
+Process.exit(watcher_pid, :shutdown)
+```

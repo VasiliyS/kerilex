@@ -30,6 +30,7 @@ defmodule Watcher.AIDMonitor.KeyStateUpdater.Worker do
   use GenServer
   require Logger
 
+  alias Watcher.KeyStateCache
   alias Kerilex.KELParser
   alias Watcher.{OOBI.LogsProcessor, KeyStateStore, EventEscrow}
   alias Watcher.AIDMonitor.KeyStateUpdater.Pool
@@ -72,12 +73,19 @@ defmodule Watcher.AIDMonitor.KeyStateUpdater.Worker do
   def handle_call({:process_new_events, parsed_events, aid}, _from, state) do
     escrow = EventEscrow.new()
 
-    with {:ok, states} <- KeyStateStore.get_ks(aid),
+    with {:ok, states} <- KeyStateStore.collect_key_state(aid),
          {:ok, escrow, ksc, cnt} <-
            LogsProcessor.process_kel(parsed_events, escrow, key_states: states),
-         :ok <- KeyStateStore.maybe_update_ks(ksc) do
-      unless EventEscrow.empty?(escrow) do
+         :ok <- KeyStateStore.maybe_update_key_states(ksc, ignore_shorter_kels: true) do
+      if !EventEscrow.empty?(escrow) do
         Logger.warning(%{msg: "KEL has out of order events"})
+      end
+
+      if KeyStateCache.has_recoveries?(ksc) do
+        Logger.warning(%{
+          msg: "performed superseding recovery",
+          aid_sn_pairs: inspect(KeyStateCache.get_recoveries(ksc))
+        })
       end
 
       Logger.info(%{msg: "updated key state", processed_key_events: cnt})
@@ -104,7 +112,6 @@ defmodule Watcher.AIDMonitor.KeyStateUpdater.Worker do
           at_sn: sn,
           event_d: stored_event["d"],
           event_t: stored_event["t"],
-          event_dt: stored_event["dt"],
           dup_event: dup_event
         })
     end

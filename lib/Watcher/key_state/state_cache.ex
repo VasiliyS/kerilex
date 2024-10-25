@@ -8,9 +8,12 @@ defmodule Watcher.KeyStateCache do
   alias Watcher.KeyStateCache
   alias Watcher.KeyState
 
-  @opaque t :: %__MODULE__{cache: %{optional(Kerilex.pre()) => KeyState.t()}}
+  @opaque t :: %__MODULE__{
+            cache: %{optional(Kerilex.pre()) => KeyState.t()},
+            recoveries: list({Kerilex.pre(), Kerilex.int_sn()})
+          }
   @doc false
-  defstruct cache: %{}
+  defstruct cache: %{}, recoveries: []
 
   @doc """
   create an empty `KeySateCache`
@@ -147,5 +150,45 @@ defmodule Watcher.KeyStateCache do
 
   def get_all_aids(%__MODULE__{cache: c}) do
     Map.keys(c)
+  end
+
+  @doc """
+  add a pair of AID prefix and the event's `sn` to the list of successful superseding recovery events
+  """
+  @spec add_recovery_info(t(), Kerilex.pre(), Kerilex.int_sn()) :: t()
+  def add_recovery_info(%__MODULE__{recoveries: r} = sc, pre, sn) do
+    %__MODULE__{sc | recoveries: [{pre, sn} | r]}
+  end
+
+  @doc """
+  check if any recovery events have been reported
+  """
+  @spec has_recoveries?(t()) :: boolean()
+  def has_recoveries?(%__MODULE__{recoveries: r}) do
+    r == []
+  end
+
+  @doc """
+  get list of reported recovery events
+  """
+  @spec get_recoveries(t()) :: [] | list({Kerilex.pre(), Kerilex.int_sn()})
+  def get_recoveries(%__MODULE__{recoveries: r}) do
+    r
+  end
+
+  @doc """
+   checks if there's a reported recovery for the specified AID prefix
+  """
+ @spec has_recovery_for?(t(), Kerilex.pre()) :: boolean()
+  def has_recovery_for?(%__MODULE__{} = ksc, pre) do
+    if get_recovery_info(ksc, pre) != nil, do: true, else: false
+  end
+
+  @doc """
+  returns reported recovery info, if present
+  """
+  @spec get_recovery_info(t(), Kerilex.pre()) :: {Kerilex.pre(), Kerilex.int_sn()} | nil
+  def get_recovery_info(%__MODULE__{recoveries: r}, pre) do
+   List.keyfind(r, pre, 0)
   end
 end

@@ -112,8 +112,11 @@ defmodule Watcher.KeyStateStore do
 
   ########################   data manipulation and access functions #####################################
 
-  @spec maybe_update_ks(KeyStateCache.t()) :: :ok | {:error, String.t()}
-  def maybe_update_ks(ksc) do
+  @spec maybe_update_key_states(KeyStateCache.t(), ignore_shorter_kels: true | false) ::
+          :ok | {:error, String.t()}
+  def maybe_update_key_states(ksc, opts \\ [ignore_shorter_kels: false]) do
+    has_recoveries? = KeyStateCache.has_recoveries?(ksc)
+
     updater = fn ->
       KeyStateCache.get_all_aids(ksc)
       |> Enum.reduce(
@@ -121,8 +124,15 @@ defmodule Watcher.KeyStateStore do
         fn pre, _res ->
           ks = KeyStateCache.get_key_state!(ksc, pre)
 
+          is_recovery? =
+            if(!has_recoveries?) do
+              false
+            else
+              KeyStateCache.has_recovery_for?(ksc, pre)
+            end
+
           Mnesia.read(@ks_table, pre)
-          |> do_update_ks(pre, ks)
+          |> do_update_ks(pre, ks, is_recovery?)
           |> case do
             {:ok, _prev_state} ->
               :ok
@@ -131,8 +141,29 @@ defmodule Watcher.KeyStateStore do
               :ok
 
             {:not_updated, {:stored_fs_gt, sn, _stored_fs, stored_state}} ->
-              err = update_ks_error_newer_stored_state(pre, sn, ks, stored_state)
-              Mnesia.abort(err)
+              err_msg = " AID='#{pre}' has a newer key state stored at sn='#{sn}',"
+              " stored state: '#{inspect(stored_state)}'"
+              " wanted to update with '#{inspect(ks)}')"
+
+              Mnesia.abort({:error, err_msg})
+
+            {:not_updated, {:stored_sn_gt, sn, stored_sn}} ->
+              if opts[:ignore_shorter_kels] do
+                Logger.info(%{
+                  msg: "received new key state with smaller sn",
+                  result: "ignored",
+                  sn: sn,
+                  stored_sn: stored_sn,
+                  pre: pre
+                })
+
+                :ok
+              else
+                err_msg = "non-recovery attempt to overwrite key state for pre='#{pre}',"
+                " existing history is longer: latest stored establishment sn=#{stored_sn},"
+                " got state with the latest establishment sn=#{sn}"
+                Mnesia.abort({:error, err_msg})
+              end
           end
         end
       )
@@ -158,30 +189,26 @@ defmodule Watcher.KeyStateStore do
     end
   end
 
-  defp update_ks_error_newer_stored_state(pre, sn, ks, stored_state) do
-    msg = ~s(
-     AID='#{pre}' has a newer key state stored at sn='#{sn}', stored state '#{inspect(stored_state)}'
-     wanted to update with '#{inspect(ks)}')
-    {:error, msg}
-  end
-
-  @spec maybe_update_ks(Kerilex.pre(), Watcher.KeyState.t()) ::
+  @spec maybe_update_key_state(Kerilex.pre(), Watcher.KeyState.t(), [{:recovery, false | true}]) ::
           {:ok, KeyState.t()}
           | {
               :not_updated,
               :equal_state
               | {:stored_fs_gt, Kerilex.int_sn(), KeyState.iso8601(), KeyState.t()}
+              | {:stored_sn_gt, Kerilex.int_sn(), Kerilex.int_sn()}
             }
           | {:error, String.t()}
-  def maybe_update_ks(prefix, %KeyState{} = state) do
+  def maybe_update_key_state(prefix, state, opts \\ [recovery: false])
+
+  def maybe_update_key_state(prefix, %KeyState{} = state, opts) do
     Mnesia.dirty_read(@ks_table, prefix)
-    |> do_update_ks(prefix, state)
+    |> do_update_ks(prefix, state, opts[:recovery])
   catch
     :exit, {:aborted, reason} ->
       {:error, "lookup for pref failed, #{reason_to_error(reason)}"}
   end
 
-  defp do_update_ks(read_res, prefix, %KeyState{se: sn} = state) do
+  defp do_update_ks(read_res, prefix, %KeyState{se: sn} = state, is_recovery?) do
     case read_res do
       [] ->
         update_ks(prefix, sn, state)
@@ -193,18 +220,22 @@ defmodule Watcher.KeyStateStore do
 
           # could be a recovery
           stored_sn >= sn ->
-            update_ks_if_newer(prefix, sn, state, prev_state)
+            update_ks_if_newer(prefix, sn, state, prev_state, is_recovery?)
         end
     end
   end
 
-  defp update_ks_if_newer(prefix, sn, state, prev_state) do
+  defp update_ks_if_newer(prefix, sn, state, prev_state, is_recovery?) do
     cond do
       prev_state.de == state.de ->
         {:not_updated, :equal_state}
 
       prev_state.fs < state.fs ->
-        update_ks(prefix, sn, state, prev_state)
+        if is_recovery? do
+          update_ks(prefix, sn, state, prev_state)
+        else
+          {:not_updated, {:stored_sn_gt, sn, prev_state.se}}
+        end
 
       prev_state.fs >= state.fs ->
         {:not_updated, {:stored_fs_gt, sn, prev_state.fs, prev_state}}
@@ -232,14 +263,21 @@ defmodule Watcher.KeyStateStore do
     end
   end
 
-  def get_ks(pre) do
+  @doc """
+  return key state for an AID prefix, if found.
+
+  The method will return all associated key states, e.g. its delegator(s) as well
+  """
+  @spec collect_key_state(Kerilex.pre()) ::
+          {:ok, [{Kerilex.pre(), KeyState.t()}]} | :not_found | {:error, String.t()}
+  def collect_key_state(pre) do
     case Mnesia.dirty_read(@ks_table, pre) do
       [] ->
         :not_found
 
       [{_table, _pre, _sn, ks}] ->
         if ks.di != false do
-          case get_ks(ks.di) do
+          case collect_key_state(ks.di) do
             {:ok, pre_ks_list} ->
               {:ok, [{pre, ks} | pre_ks_list]}
 
@@ -258,7 +296,25 @@ defmodule Watcher.KeyStateStore do
       {:error, "lookup for AID pref='#{pre}' failed: #{reason_to_error(reason)}"}
   end
 
-  @spec update_kel({Kerilex.pre(), integer()}, map()) ::
+  @doc """
+  Returns the latest key state for a prefix
+  """
+  @spec get_state(Kerilex.pre()) :: {:ok, map(), integer()} | :not_found | {:error, String.t()}
+  def get_state(prefix) do
+    Mnesia.dirty_read(@ks_table, prefix)
+    |> case do
+      [] ->
+        :not_found
+
+      [{_table, _prefix, sn, state}] ->
+        {:ok, state, sn}
+    end
+  catch
+    :exit, {:aborted, reason} ->
+      {:error, "lookup for pref failed, #{reason_to_error(reason)}"}
+  end
+
+  @spec update_kel({Kerilex.pre(), Kerilex.int_sn()}, map()) ::
           {:ok, Kerilex.said()}
           # | :not_updated
           | {:error, String.t()}
@@ -459,7 +515,7 @@ defmodule Watcher.KeyStateStore do
   end
 
   def find_end_point({wit_aid, scheme}, url) do
-    head_match = {@backers_table, {wit_aid, scheme}, :_, %{URL: url} }
+    head_match = {@backers_table, {wit_aid, scheme}, :_, %{URL: url}}
 
     Mnesia.dirty_match_object(head_match)
     |> case do
@@ -475,24 +531,6 @@ defmodule Watcher.KeyStateStore do
   end
 
   @doc """
-  Returns the latest key state for a prefix
-  """
-  @spec get_state(Kerilex.pre()) :: {:ok, map(), integer()} | :not_found | {:error, String.t()}
-  def get_state(prefix) do
-    Mnesia.dirty_read(@ks_table, prefix)
-    |> case do
-      [] ->
-        :not_found
-
-      [{_table, _prefix, sn, state}] ->
-        {:ok, state, sn}
-    end
-  catch
-    :exit, {:aborted, reason} ->
-      {:error, "lookup for pref failed, #{reason_to_error(reason)}"}
-  end
-
-  @doc """
   perform recovery event handling and then, if successful,
   delete hanging chain of events after a parent `ixn` or a `drt` event has been superseded
   via recovery
@@ -501,7 +539,7 @@ defmodule Watcher.KeyStateStore do
     transactor = fn ->
       with resp when elem(resp, 0) != :error <- recovery_callback.(),
            {:ok, cnt} <- delete_events_starting_at(pref, sn + 1) do
-        Logger.warning("deleted #{cnt} events of the AID='#{pref}' starting at sn=#{sn + 1}")
+        Logger.warning("deleted #{cnt} event(s) of the AID='#{pref}' starting at sn=#{sn + 1}")
         resp
       else
         {:error, reason} ->
@@ -509,13 +547,13 @@ defmodule Watcher.KeyStateStore do
       end
     end
 
-    Mnesia.transaction(transactor) |> handle_transaction_res()
+    Mnesia.transaction(transactor) |> handle_transaction_res(recovery: true)
   end
 
-  defp handle_transaction_res(res) do
+  defp handle_transaction_res(res, opts \\ [recovery: false]) do
     case res do
       {:atomic, res} ->
-        res
+        if opts[:recovery], do: {:recovery, res}, else: res
 
       {:aborted, reason} when is_tuple(reason) and elem(reason, 0) == :error ->
         # an error tuple returned from a transaction
@@ -589,7 +627,7 @@ defmodule Watcher.KeyStateStore do
   @doc """
   checks that we have a matching sealing event in the KEL
   """
-  @spec check_seal(Kerilex.pre(), {non_neg_integer(), Kerilex.said()}, map()) ::
+  @spec check_seal(Kerilex.pre(), {Kerilex.int_sn(), Kerilex.said()}, map()) ::
           :ok
           | {:event_not_found, tuple()}
           | {:error, String.t()}
@@ -640,4 +678,11 @@ defmodule Watcher.KeyStateStore do
   end
 
   defp reason_to_error(reason), do: inspect(reason)
+
+
+# head_match = {:kel, {provenant_qvi_aid, :"$1"}, %{"t" => "ixn", "a" => :"$2"}}
+# guard = [{:==, {:map_get, "i",{:hd, :"$2"}}, "EJhtyGdoiAatzAg-G2gDtXJ8D_Sn0ByRegNs4BnNLtnP"}]
+# result = {{:"$1", {:map_get, "s", {:hd, :"$2"}}}}
+
+# :mnesia.dirty_select(:kel, [{head_match, guard, [result]}])
 end

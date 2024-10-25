@@ -39,14 +39,17 @@ It currently consists of two parts:
 
 
 from the project's root directory get and compile dependencies. 
-```
+```bash
  mix deps.get
  mix deps.compile
 ```
 
-then
+> You can either use the `iex` to paly with the API or use [`livebook`](#livebook-demo) to see how the `Watcher` functionality works.
 
-```
+
+#### Explore the API
+
+```bash
 mkdir -p tmp/db
 
 iex -S mix
@@ -187,3 +190,23 @@ output
  }}
 ```
 
+## Livebook demo
+
+### Prerequisites
+
+1. Install `Elixir` as outlined [above](#prerequisites)
+
+2. Install [livebook](https://livebook.dev)
+    >If you are not familiar with it, `livebook` is analogous to the Python's Jupiter Notebook
+
+3. From the root directory of the `Kerilex` repo start `iex` as follows:
+
+    ```bash 
+     iex --name kerilex@127.0.0.1 --cookie demo -S mix
+   ```
+
+4. Start `livebook` 
+
+5.  Connect `livebook` to the running node using `name` and `cookie` as parameters. 
+
+6. open `experimental/demo/watcher.livemd` file.

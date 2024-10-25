@@ -259,19 +259,22 @@ defmodule Watcher.KeyState.RotEvent do
   end
 
   defp do_check_key_rules(ind, oind, sig_keys, prior_next_keys) do
+    # `rot` and `drt` simply add new keys via `2A` pointing to a key in the prev_next_key_array
+    #  where has will not match!!
+    #  :match <-
+    #    (pnk == pnk_at_oidx && :match) ||
+    #      {:error,
+    #       "current signing key(#{key}) at ind(#{ind}) does not match next prior key(#{pnk_at_oidx}) at oind(#{oind})"} do
     with key <- Enum.at(sig_keys, ind),
          :key_found <-
            (key != nil && :key_found) || {:error, "out of bound signing key index(#{ind})"},
          pnk_at_oidx = Enum.at(prior_next_keys, oind),
          :key_found <-
            (pnk_at_oidx != nil && :key_found) ||
-             {:error, "out of bound prior next key index='#{oind}' prior next keys n='#{inspect(prior_next_keys)}' )"},
-         pnk = Kerilex.Crypto.hash_and_encode!(key),
-         :match <-
-           (pnk == pnk_at_oidx && :match) ||
              {:error,
-              "current signing key(#{key}) at ind(#{ind}) does not match next prior key(#{pnk_at_oidx}) at oind(#{oind})"} do
-      :ok
+              "out of bound prior next key index='#{oind}' prior next keys n='#{inspect(prior_next_keys)}' )"},
+         pnk = Kerilex.Crypto.hash_and_encode!(key) do
+      if pnk != pnk_at_oidx, do: :new_key_added, else: :ok
     else
       {:error, _} = err -> err
     end

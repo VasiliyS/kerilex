@@ -3,6 +3,7 @@ defmodule Watcher.OOBI.LogsProcessorTest do
   `Watcher.OOBI.LogsProcessor` tests
   """
   use ExUnit.Case, async: false
+  alias Hex.API.Key
   alias Watcher.KeyState
   alias Watcher.KeyStateCache
   alias Watcher.OOBI.LogsProcessor
@@ -36,6 +37,12 @@ defmodule Watcher.OOBI.LogsProcessorTest do
     @tag test_kel: "delegator-plus-3-rot-changes.cesr"
     test "3 rot events with witness and key changes", ctx do
       {escrow, _state_cache} = do_log_processor_test(ctx)
+      assert EventEscrow.empty?(escrow)
+    end
+
+    @tag test_kel: "provenant-oct-24-rot-new-keys.cesr"
+    test "delegate of delegate, drt with all new keys", ctx do
+      {escrow, _sate_cache} = do_log_processor_test(ctx)
       assert EventEscrow.empty?(escrow)
     end
 
@@ -98,26 +105,32 @@ defmodule Watcher.OOBI.LogsProcessorTest do
     @tag recovery_kels:
            {"delegator-plus-2-ixn.cesr", "delegator-superseding-recovery-rot-at-3.cesr"}
     @tag pre: "EHpD0-CDWOdu5RJ8jHBSUkOqBZ3cXeDVHWNb_Ul89VI7"
+    @tag rec_sn: 3
     test "recovery succeeds and is done correctly", %{
       kel_data: %KelTestData{parsed_kel: test_kel, state_cache: ref_state_cache},
       key_states: states,
-      pre: pre
+      pre: pre,
+      rec_sn: sn
     } do
-      {:ok, escrow, state_cache} =
+      {:ok, escrow, state_cache, _msg_count} =
         LogsProcessor.process_kel(test_kel, EventEscrow.new(), key_states: states)
 
       assert EventEscrow.empty?(escrow)
       assert_state_cache_equal?(ref_state_cache, state_cache)
 
-      refute KeyStateStore.has_event_after?(pre, 3, "*"),
+      refute KeyStateStore.has_event_after?(pre, sn, "*"),
              "all events after the recovered one must be deleted"
+
+      assert KeyStateCache.has_recoveries?(state_cache)
+      assert KeyStateCache.has_recovery_for?(state_cache, pre)
+      assert KeyStateCache.get_recovery_info(state_cache,pre) == {pre, sn}
     end
   end
 
   defp do_log_processor_test(%{
          kel_data: %KelTestData{parsed_kel: test_kel, state_cache: ref_state_cache}
        }) do
-    {:ok, escrow, test_state_cache} =
+    {:ok, escrow, test_state_cache, _msg_count} =
       test_kel |> LogsProcessor.process_kel(EventEscrow.new())
 
     assert assert_state_cache_equal?(test_state_cache, ref_state_cache)

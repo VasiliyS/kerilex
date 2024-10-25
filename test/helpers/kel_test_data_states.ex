@@ -302,4 +302,143 @@ defmodule KelTestData.Kels do
        {"EHpD0-CDWOdu5RJ8jHBSUkOqBZ3cXeDVHWNb_Ul89VI7", ks}
      ])}
   end
+
+  def provenant_oct_24_rot_new_keys do
+    aid_gleif_root = "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2"
+    aid_gleif_geda = "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS"
+    aid_provenant_qvi = "ED88Jn6CnWpNbSYz6vp9DOSpJH2_Di5MSwWTf1l34JJm"
+
+    ks_gleif_root = %Watcher.KeyState{
+      pe: "ECphNWm1_jZOupeKh6C7TlBi81BlERqbnMpyqpnS4CJY",
+      te: "rot",
+      se: 2,
+      de: "EHsL1ldIafZC-M9-3RgLQB3m2_2F0aYIiNBGnTVoFDH2",
+      fs: "2024-10-24T17:58:28.170581Z",
+      k: ["DNLdWqTBKOhDO8YfE5uIaTvN-n_Jv20-5ZwK609BvG0b",
+       "DL68G7IW4zT2ryLRDziYiRyvwIDyq9xssVuZ3u6w-30Y",
+       "DH63RGGv_r8pQ5Di9MVblcofkBm0O8r6SUY0cqNAYqne"],
+      kt: %Kerilex.Crypto.WeightedKeyThreshold{
+        size: 3,
+        weights: [Ratio.new(1, 3), Ratio.new(1, 3), Ratio.new(1, 3)],
+        sum: Ratio.new(1, 1),
+        ind_ranges: [0..2]
+      },
+      n: ["EPHYDUnxDH7xcAim3aYvS9bvh7JmdBDKc__w2_McXr6I",
+       "EHgOexUh8AvN7rXblsSr6MJE5Gn1HPq5Mv9KFpCpllKN",
+       "ECH4pTtUI653ykKb_capPBkKF3RvBZRzyb5dPfuJCfOf",
+       "ELXXiPwoaWOVOTLMOAmg4IKkjFHFs3q2hsL9tHvuuC2D",
+       "EAcNrjXFeGay9qqMj96FIiDdXqdWjX17QXzdJvq58Zco",
+       "EF1IPGq_uF3FmywFdIQXSO4jy0QhtzREVMlPQ8PEy_As",
+       "EHGlZciB0cZ627-MJrQxyw5niNzN1nKnNMDaJO7sCEvF"],
+      nt: %Kerilex.Crypto.WeightedKeyThreshold{
+        size: 7,
+        weights: [Ratio.new(1, 3), Ratio.new(1, 3), Ratio.new(1, 3),
+         Ratio.new(1, 3), Ratio.new(1, 3), Ratio.new(1, 3), Ratio.new(1, 3)],
+        sum: Ratio.new(7, 3),
+        ind_ranges: [0..6]
+      },
+      b: ["BNfDO63ZpGc3xiFb0-jIOUnbr_bA-ixMva5cZb3s4BHB",
+       "BDwydI_FJJ-tvAtCl1tIu_VQqYTI3Q0JyHDhO1v2hZBt",
+       "BGYJwPAzjyJgsipO7GY9ZsBTeoUJrdzjI2w_5N-Nl6gG",
+       "BM4Ef3zlUzIAIx-VC8mXziIbtj-ZltM8Aor6TZzmTldj",
+       "BLo6wQR73-eH5v90at_Wt8Ep_0xfz05qBjM3_B1UtKbC"],
+      bt: 4,
+      c: ["EO"],
+      di: false,
+      last_event: {"rot", 2, "EHsL1ldIafZC-M9-3RgLQB3m2_2F0aYIiNBGnTVoFDH2"}
+    }
+
+    ks_gleif_geda = %Watcher.KeyState{
+      pe: nil,
+      te: "dip",
+      se: 0,
+      de: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS",
+      fs: "2024-10-24T17:58:28.177890Z",
+      k: ["DEO7QT90CzPeCubjcAgDlYI-yudt0c_4HeAb1_RbrGiF",
+       "DKu6Q_Qth7x-pztt11qXDr42B9aUjkp_v9Rq8-xXcQjF",
+       "DEiPSxcuILZFxJscr_Lt8fuiidhB_HrqKxoCbZr9tQfp",
+       "DIqrjqqwArsSHIX3n510DnSrYL9ULbYOpi14hEencBSC",
+       "DAB9Tl0T8-638H65GMFj2G7CAr4CoExZ5xH-U1ADldFP"],
+      kt: %Kerilex.Crypto.WeightedKeyThreshold{
+        size: 5,
+        weights: [Ratio.new(1, 2), Ratio.new(1, 2), Ratio.new(1, 2),
+         Ratio.new(1, 2), Ratio.new(1, 2)],
+        sum: Ratio.new(5, 2),
+        ind_ranges: [0..4]
+      },
+      n: ["EObLskWwczY3R-ALRPWiyyThtraelnbh6MMeJ_WcR3Gd",
+       "ENoI2e5f59xEF83joX__915Va-OIE7480wWyh2-8bJk7",
+       "EElSAVDf2vU8aoxN50eSMNm6MrQ-Hv_2xOWC02tFrS3M",
+       "EHX0Re-hExzl7mvLuRwQHEew-8oPOQh4rqXJNHBo9EyW",
+       "EBGeYe1_ZgN_ly0qVY-Y1FayZkNA5Yq9LTujrh2ylKbm"],
+      nt: %Kerilex.Crypto.WeightedKeyThreshold{
+        size: 5,
+        weights: [Ratio.new(1, 2), Ratio.new(1, 2), Ratio.new(1, 2),
+         Ratio.new(1, 2), Ratio.new(1, 2)],
+        sum: Ratio.new(5, 2),
+        ind_ranges: [0..4]
+      },
+      b: ["BDkq35LUU63xnFmfhljYYRY0ymkCg7goyeCxN30tsvmS",
+       "BLmvLSt1mDShWS67aJNP4gBVBhtOc3YEu8SytqVSsyfw",
+       "BHxz8CDS_mNxAhAxQe1qxdEIzS625HoYgEMgqjZH_g2X",
+       "BGYJwPAzjyJgsipO7GY9ZsBTeoUJrdzjI2w_5N-Nl6gG",
+       "BFl6k3UznzmEVuMpBOtUUiR2RO2NZkR3mKrZkNRaZedo"],
+      bt: 4,
+      c: [],
+      di: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2",
+      last_event: {"ixn", 8, "EDxDCjQoH82EgDEcSAU1SD__VKoebRUgr95nFweJxMgu"}
+    }
+
+    ks_provenant_qvi = %Watcher.KeyState{
+      pe: "EC-6m6Ng36mYBLk0c2_wHxnD7bZQpbquBSUledELCeBf",
+      te: "drt",
+      se: 24,
+      de: "EBD3Oyid3m2mRO7e_7JeoLzQe_GZE8WEbne2IMz3prwf",
+      fs: "2024-10-24T17:58:28.182084Z",
+      k: ["DCIFx-ddfBCOWTEXqVIxyUa76dea3b73JVbovfmq-6kz",
+       "DD1w-uZAF22vPLMp4nzq_VQ918GGd6FdO0RbyLYly4Vb",
+       "DMiOUvQa9hjGN8zv3NayvYG5yqGAcUVFf_q-SmVUiz7G",
+       "DOX9KEk7dcPzy2VNvl699_Qq2-KML-MmYw6PPP2t1pUW",
+       "DCxegeDmgcO-ma5G0iphkGfjJ-b6fC8OwZajgpDGuK-f",
+       "DCw9XQLP0eBcSqIlAnsBujQsRroS-KLvRb4t5jTFLQ8C",
+       "DAHePH7y_tv9tg2Rchvdzo5P67iimFJiL-wYQNDA34ur",
+       "DJWc0cn27pUjBoBNf3cQgViWvcDUPOSWP7GCeHrZ5xno"],
+      kt: %Kerilex.Crypto.WeightedKeyThreshold{
+        size: 8,
+        weights: [Ratio.new(0, 1), Ratio.new(0, 1), Ratio.new(0, 1),
+         Ratio.new(0, 1), Ratio.new(1, 2), Ratio.new(1, 2), Ratio.new(1, 2),
+         Ratio.new(1, 2)],
+        sum: Ratio.new(2, 1),
+        ind_ranges: [0..7]
+      },
+      n: ["EJ9MGn2MW0MP8o2mWUaLZmptgWH9rP3sKjGm43NtFKwl",
+       "EFmAIIgfpwKLmmo3ruuneQAtt_MI3crleCFajPJxIO5S",
+       "EPeofvCu0M5YyymqpsGexvBo0YI-DfnDOnWRZW0QqVrv",
+       "ECvKPR7i5ZoeVJaB3UmyqLiYxVXDyDMdAwU1-t6uvukt"],
+      nt: %Kerilex.Crypto.WeightedKeyThreshold{
+        size: 4,
+        weights: [Ratio.new(1, 2), Ratio.new(1, 2), Ratio.new(1, 2),
+         Ratio.new(1, 2)],
+        sum: Ratio.new(2, 1),
+        ind_ranges: [0..3]
+      },
+      b: ["BNwSX8dtJ_Q-jlSIcgaL9phC2qT-PwNy_z1p-QSFPGMg",
+       "BK5BgSYAzXvkzZU03-8Fo_eWoVdvlwQexGavi205MKQN",
+       "BIHIg-sMesHIzbLzl8r9hq4797WZ8yKBidIKUKPrmEAk",
+       "BLBC0dK4vnEEMa3Gw_P9_rHow6BRmU5lIXUqxdbEKWKk",
+       "BOCWZuhoRHL_HpySDk450Shz2CNf9N5XNWmumlzvDGJj"],
+      bt: 4,
+      c: [],
+      di: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS",
+      last_event: {"drt", 24, "EBD3Oyid3m2mRO7e_7JeoLzQe_GZE8WEbne2IMz3prwf"}
+    }
+
+    {"provenant-oct-24-rot-new-keys.cesr",
+     KeyStateCache.new!([
+       {aid_gleif_root, ks_gleif_root},
+       {aid_gleif_geda, ks_gleif_geda},
+       {aid_provenant_qvi, ks_provenant_qvi}
+     ])}
+  end
+
 end

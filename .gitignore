@@ -29,3 +29,4 @@ kerilex-*.tar
 
 .elixir_ls
 .direnv
+.envrc

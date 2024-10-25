@@ -120,7 +120,7 @@ defmodule Watcher.AIDMonitor.ObservationScheduler do
   end
 
   defp update_queue(state, {_timestamp, []}) do
-    Logger.debug(%{msg: "skipping empty batch"})
+    # Logger.debug(%{msg: "skipping empty batch"})
     state
   end
 
@@ -151,11 +151,11 @@ defmodule Watcher.AIDMonitor.ObservationScheduler do
         dispatch_observations(%SchedulerState{state | queue: queue}, rem_demand, observations)
 
       :empty ->
-        Logger.debug(%{
-          msg: "sending demand, queue is empty",
-          pending_demand: demand,
-          observations: observations
-        })
+        # Logger.debug(%{
+          # msg: "sending demand, queue is empty",
+          # pending_demand: demand,
+          # observations: observations
+        # })
 
         {:noreply, Enum.reverse(observations), %SchedulerState{state | pend_demand: demand}}
     end

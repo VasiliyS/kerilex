@@ -126,7 +126,10 @@ defmodule Watcher.DidWebsProducer do
   end
 
   defp cond_threshold(%WeightedKeyThreshold{} = kt, k, cid, aid) do
-    common_denominator = kt.sum |> Ratio.denominator()
+    common_denominator =
+      if Ratio.denominator(kt.sum) == 1,
+        do: Ratio.numerator(kt.sum),
+        else: Ratio.denominator(kt.sum)
 
     [
       id: "#" <> aid,
@@ -135,6 +138,7 @@ defmodule Watcher.DidWebsProducer do
       threshold: common_denominator,
       conditionWeightedThreshold:
         Enum.zip(kt.weights, k)
+        |> Enum.filter(fn {w, _key} -> Ratio.numerator(w) != 0 end)
         |> Enum.map(fn {w, key} ->
           [
             condition: "#" <> key,

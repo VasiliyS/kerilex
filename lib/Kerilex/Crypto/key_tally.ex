@@ -74,6 +74,22 @@ defmodule Kerilex.Crypto.KeyTally do
      "bad argument, got '#{data}', expected an integer, hex encoded integer string or a list of fractions"}
   end
 
+  def new_from_ratios(ratios) when is_list(ratios) do
+
+    sum = Enum.reduce(ratios, fn r, acc ->  Ratio.add(r, acc) end)
+    size = length(ratios)
+    range = 0..(size - 1)
+
+
+    {:ok,
+         %WKT{
+           size: size,
+           weights: ratios,
+           sum: sum,
+           ind_ranges: [range]
+         }}
+  end
+
   def null?(kt)
 
   def null?(%KT{threshold: 0}), do: true
@@ -281,4 +297,9 @@ defmodule Kerilex.Crypto.KeyTally do
         Ratio.gte?(sum, 1)
     end
   end
+
+  def lcm(_, 0), do: 0
+  def lcm(0, _), do: 0
+  def lcm(lhs, rhs), do: abs(Integer.floor_div(lhs, Integer.gcd(lhs, rhs)) * rhs)
+
 end

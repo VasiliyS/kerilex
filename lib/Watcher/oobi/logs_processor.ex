@@ -100,19 +100,19 @@ defmodule Watcher.OOBI.LogsProcessor do
       {:ok, said, key_state, res} when said != nil ->
         Logger.debug(Map.put(res, :msg, "added event"))
 
-        escrow
-        |> process_escrow(said, key_state)
-        |> case do
-          {:ok, escrow, key_state} ->
-            {:cont, {:ok, escrow, key_state, msg_count + 1}}
-
-          {:error, reason} ->
-            do_process_kel_err(reason)
-        end
+        maybe_process_waiting_msgs(escrow, said, key_state, msg_count)
 
       {:ok, _said = nil, key_state, res} ->
         Logger.debug(Map.put(res, :msg, "event not added"))
         {:cont, {:ok, escrow, key_state, msg_count + 1}}
+
+      {:recovery, said, key_state, res} ->
+        rec_pre = Map.fetch!(res, :pre)
+        rec_sn = Map.fetch!(res, :sn)
+        Logger.debug(Map.put(res, :msg, "recovery"))
+        key_state = key_state |> KeyStateCache.add_recovery_info(rec_pre, rec_sn)
+
+        maybe_process_waiting_msgs(escrow, said, key_state, msg_count)
 
       {:out_of_order, said, event_obj} ->
         pre = event_obj["i"]
@@ -144,6 +144,19 @@ defmodule Watcher.OOBI.LogsProcessor do
 
       other ->
         raise "kel processing pipeline returned an unknown response: '#{inspect(other)}'"
+    end
+  end
+
+  @compile {:inline, maybe_process_waiting_msgs: 4}
+  defp maybe_process_waiting_msgs(escrow, said, key_state, msg_count) do
+    escrow
+    |> process_escrow(said, key_state)
+    |> case do
+      {:ok, escrow, key_state} ->
+        {:cont, {:ok, escrow, key_state, msg_count + 1}}
+
+      {:error, reason} ->
+        do_process_kel_err(reason)
     end
   end
 
@@ -195,6 +208,7 @@ defmodule Watcher.OOBI.LogsProcessor do
           KeyStateCache.t()
         ) ::
           {:ok, Kerilex.said() | nil, KeyStateCache.t(), log_response()}
+          | {:recovery, Kerilex.said(), KeyStateCache.t(), log_response()}
           | {:out_of_order, Kerilex.said(), Jason.OrderedObject.t()}
           | {:error, String.t()}
           | {:duplicity, Kerilex.pre(), Kerilex.int_sn(), Jason.OrderedObject.t(),
@@ -586,6 +600,8 @@ defmodule Watcher.OOBI.LogsProcessor do
       maybe_store_msg("rot", msg_obj, parsed_msg, state_cache)
     end
 
+    # this will wrap the resp of the `attempt_recovery` function
+    # in {:recovery, resp} tuple
     KeyStateStore.handle_recovery(pre, sn, attempt_recovery)
     |> handle_update_kel_res(msg_obj, state_cache)
   end
@@ -611,19 +627,27 @@ defmodule Watcher.OOBI.LogsProcessor do
 
   @compile {:inline, handle_update_kel_res: 3}
   defp handle_update_kel_res(res, event_obj, state_cache) do
+    pre = event_obj["i"]
+    type = event_obj["t"]
+    sn = event_obj["s"]
+
     case res do
       {:ok, said} ->
-        pre = event_obj["i"]
-        type = event_obj["t"]
-        sn = event_obj["s"]
         {:ok, said, state_cache, %{type: type, result: "updated KEL", pre: pre, sn: sn}}
+
+      {:recovery, {:ok, said, state_cache, log_report}} ->
+        {:recovery, said, state_cache,
+         %{log_report | result: "performed superseding recovery"}}
 
       {:failed_recovery, reason} ->
         {:error,
          "recovery attempt failed, reason='#{inspect(reason)}' superseding event pre='#{event_obj["i"]}' 'type='#{event_obj["t"]}' sn='#{event_obj["s"]}' said='#{event_obj["d"]}'"}
 
-      error ->
+      error when elem(error, 0) == :error ->
         error
+
+      resp ->
+        raise "kel update returned an unknown response: #{inspect(resp)}"
     end
   end
 
