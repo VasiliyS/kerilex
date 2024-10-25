@@ -56,54 +56,56 @@ iex -S mix
 ```
 ```elixir
 :mnesia.stop
-
-Watcher.KeyStateStore.create_schema
+:mnesia.create_schema([node()])
+:mnesia.start
 
 Watcher.KeyStateStore.init_tables
 
+alias Watcher.{OOBI.LogsProcessor, EventEscrow}
+
 gleif_geda_kel = File.read!("test/data/gleif-kel-july-23-24") |> Kerilex.KELParser.parse
 
-gleif_geda_kel |> Watcher.OOBI.LogsProcessor.process_kel()
+gleif_geda_kel |> LogsProcessor.process_kel(EventEscrow.new())
 
 ```
 
 output
 ```elixir
-17:52:43.824 [debug] [type: "icp", msg: "added event", result: "updated KEL", pre: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2", sn: 0]
+18:23:26.910 [debug] [type: "icp", msg: "added event", result: "updated KEL", pre: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2", sn: 0]
 
-17:52:43.826 [debug] [type: "rot", msg: "added event", result: "updated KEL", pre: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2", sn: 1]
+18:23:26.912 [debug] [type: "rot", msg: "added event", result: "updated KEL", pre: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2", sn: 1]
 
-17:52:43.828 [debug] [type: "rot", msg: "added event", result: "updated KEL", pre: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2", sn: 2]
+18:23:26.913 [debug] [type: "rot", msg: "added event", result: "updated KEL", pre: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2", sn: 2]
 
-17:52:43.830 [debug] [type: "dip", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 0]
+18:23:26.914 [debug] [type: "dip", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 0]
 
-17:52:43.831 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 1]
+18:23:26.915 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 1]
 
-17:52:43.833 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 2]
+18:23:26.915 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 2]
 
-17:52:43.834 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 3]
+18:23:26.916 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 3]
 
-17:52:43.835 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 4]
+18:23:26.916 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 4]
 
-17:52:43.836 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 5]
+18:23:26.916 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 5]
 
-17:52:43.837 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 6]
+18:23:26.917 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 6]
 
-17:52:43.838 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 7]
+18:23:26.917 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 7]
 
-17:52:43.839 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 8]
+18:23:26.918 [debug] [type: "ixn", msg: "added event", result: "updated KEL", pre: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS", sn: 8]
 
-17:52:43.839 [debug] [type: "rpy", msg: "added event", result: "added witness", url: "http://65.21.253.212:5623/"]
+18:23:26.918 [debug] [type: "rpy", msg: "added event", result: "added witness", url: "http://65.21.253.212:5623/"]
 
-17:52:43.839 [debug] [type: "rpy", msg: "added event", result: "added witness", url: "http://8.210.213.186:5623/"]
+18:23:26.918 [debug] [type: "rpy", msg: "added event", result: "added witness", url: "http://8.210.213.186:5623/"]
 
-17:52:43.839 [debug] [type: "rpy", msg: "added event", result: "added witness", url: "http://51.79.54.121:5623/"]
+18:23:26.919 [debug] [type: "rpy", msg: "added event", result: "added witness", url: "http://51.79.54.121:5623/"]
 
-17:52:43.840 [debug] [type: "rpy", msg: "added event", result: "added witness", url: "http://102.37.159.99:5623/"]
+18:23:26.919 [debug] [type: "rpy", msg: "added event", result: "added witness", url: "http://102.37.159.99:5623/"]
 
-17:52:43.840 [debug] [type: "rpy", msg: "added event", result: "added witness", url: "http://54.233.109.129:5623/"]
+18:23:26.919 [debug] [type: "rpy", msg: "added event", result: "added witness", url: "http://54.233.109.129:5623/"]
 
-17:52:43.840 [info] [msg: "finished processing KEL messages", kel_length: 17]
+18:23:26.919 [debug] [msg: "finished processing KEL messages", kel_length: 17]
 {:ok, %Watcher.EventEscrow{store: %{}},
  %Watcher.KeyStateCache{
    cache: %{
@@ -112,7 +114,7 @@ output
        te: "rot",
        se: 2,
        de: "EHsL1ldIafZC-M9-3RgLQB3m2_2F0aYIiNBGnTVoFDH2",
-       fs: "2024-09-04T08:52:04.784896Z",
+       fs: "2024-10-25T16:23:26.910544Z",
        k: ["DNLdWqTBKOhDO8YfE5uIaTvN-n_Jv20-5ZwK609BvG0b",
         "DL68G7IW4zT2ryLRDziYiRyvwIDyq9xssVuZ3u6w-30Y",
         "DH63RGGv_r8pQ5Di9MVblcofkBm0O8r6SUY0cqNAYqne"],
@@ -151,7 +153,7 @@ output
        te: "dip",
        se: 0,
        de: "EINmHd5g7iV-UldkkkKyBIH052bIyxZNBn9pq-zNrYoS",
-       fs: "2024-09-04T08:52:04.790185Z",
+       fs: "2024-10-25T16:23:26.914180Z",
        k: ["DEO7QT90CzPeCubjcAgDlYI-yudt0c_4HeAb1_RbrGiF",
         "DKu6Q_Qth7x-pztt11qXDr42B9aUjkp_v9Rq8-xXcQjF",
         "DEiPSxcuILZFxJscr_Lt8fuiidhB_HrqKxoCbZr9tQfp",
@@ -186,8 +188,9 @@ output
        di: "EDP1vHcw_wc4M__Fj53-cJaBnZZASd-aMTaSyWEQ-PC2",
        last_event: {"ixn", 8, "EDxDCjQoH82EgDEcSAU1SD__VKoebRUgr95nFweJxMgu"}
      }
-   }
- }}
+   },
+   recoveries: []
+ }, 17}
 ```
 
 ## Livebook demo
